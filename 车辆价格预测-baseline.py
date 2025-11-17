@@ -208,14 +208,26 @@ print('时间特征示例:')
 print(train[time_features].head())
 
 # Cell 10
+# 查看原始数据中的品牌、型号和地域列信息
+print('原始数据中的品牌、型号和地域列信息：')
+print('品牌(brand) - 唯一值数量:', train['brand'].nunique())
+print('型号(carModel) - 唯一值数量:', train['carModel'].nunique())
+print('地域(regionCode) - 唯一值数量:', train['regionCode'].nunique())
+
+# 查看这些列的一些基本统计信息
+print('\n品牌、型号和地域的基本统计信息：')
+print('品牌分布：', train['brand'].value_counts().head(10))
+print('型号分布：', train['carModel'].value_counts().head(10))
+print('地域分布：', train['regionCode'].value_counts().head(10))
+
 numerical_cols = train.select_dtypes(exclude = 'object').columns
-print(numerical_cols)
+print('\n数值列：', numerical_cols)
 
 # Cell 11
 ## 选择特征列 - 包含新的时间特征和Type特征
 feature_cols = [
     col for col in numerical_cols if col not in [
-        'ID', 'name', 'regDate', 'creatDate', 'price', 'model', 'brand',
+        'ID', 'name', 'regDate', 'creatDate', 'price', 'carModel', 'brand',
         'regionCode', 'seller'
     ]
 ]
@@ -239,25 +251,95 @@ print(f'power大于600的样本数: {len(train[train["power"] > 600])}')
 print(f'使用的截断值: {power_upper}')
 
 # Cell 12
-## 2.3 特征组合与特征选择
+## Cell 13
 print('\n=== 特征组合与特征选择 ===')
 
-# 创建特征组合
+# 1. 创建特征组合
 print('\n1. 创建特征组合')
+
+# 现有特征组合
 train['power_km_ratio'] = train['power'] / (train['km'] + 1)  # +1避免除零
 test['power_km_ratio'] = test['power'] / (test['km'] + 1)
 
-# 创建其他可能的特征组合
 train['power_age_ratio'] = train['power'] / (train['car_age_days'] + 1)
 test['power_age_ratio'] = test['power'] / (test['car_age_days'] + 1)
 
 train['km_age_ratio'] = train['km'] / (train['car_age_days'] + 1)
 test['km_age_ratio'] = test['km'] / (test['car_age_days'] + 1)
 
-print(f'新增的特征组合: power_km_ratio, power_age_ratio, km_age_ratio')
+# 基于品牌、型号和地域的组合特征
+print('\n创建基于品牌、型号和地域的组合特征...')
 
-# 更新特征列列表
-feature_cols.extend(['power_km_ratio', 'power_age_ratio', 'km_age_ratio'])
+# 1. 品牌-型号组合
+print('创建品牌-型号组合特征...')
+train['brand_model'] = train['brand'].astype(str) + '_' + train['carModel'].astype(str)
+test['brand_model'] = test['brand'].astype(str) + '_' + test['carModel'].astype(str)
+
+# 2. 品牌-地域组合
+print('创建品牌-地域组合特征...')
+train['brand_region'] = train['brand'].astype(str) + '_' + train['regionCode'].astype(str)
+test['brand_region'] = test['brand'].astype(str) + '_' + test['regionCode'].astype(str)
+
+# 3. 型号-地域组合
+print('创建型号-地域组合特征...')
+train['model_region'] = train['carModel'].astype(str) + '_' + train['regionCode'].astype(str)
+test['model_region'] = test['carModel'].astype(str) + '_' + test['regionCode'].astype(str)
+
+# 4. 品牌平均功率特征
+print('创建品牌平均功率特征...')
+brand_avg_power = train.groupby('brand')['power'].mean().to_dict()
+train['brand_avg_power'] = train['brand'].map(brand_avg_power)
+test['brand_avg_power'] = test['brand'].map(brand_avg_power)
+
+# 5. 地域平均车龄特征
+print('创建地域平均车龄特征...')
+region_avg_age = train.groupby('regionCode')['car_age_days'].mean().to_dict()
+train['region_avg_age'] = train['regionCode'].map(region_avg_age)
+test['region_avg_age'] = test['regionCode'].map(region_avg_age)
+
+# 6. 品牌-型号平均价格特征（用于参考，不直接作为特征）
+print('创建品牌-型号平均价格特征...')
+brand_model_avg_price = train.groupby(['brand', 'carModel'])['price'].mean().to_dict()
+train['brand_model_avg_price'] = train.set_index(['brand', 'carModel']).index.map(brand_model_avg_price)
+test['brand_model_avg_price'] = test.set_index(['brand', 'carModel']).index.map(brand_model_avg_price)
+
+# 将新特征转换为数值类型
+print('将新特征转换为数值类型...')
+# 对类别组合特征进行标签编码
+from sklearn.preprocessing import LabelEncoder
+
+# 标签编码器实例
+le = LabelEncoder()
+
+# 对brand_model进行编码
+combined_brand_model = pd.concat([train['brand_model'], test['brand_model']])
+le.fit(combined_brand_model)
+train['brand_model_enc'] = le.transform(train['brand_model'])
+test['brand_model_enc'] = le.transform(test['brand_model'])
+
+# 对brand_region进行编码
+combined_brand_region = pd.concat([train['brand_region'], test['brand_region']])
+le.fit(combined_brand_region)
+train['brand_region_enc'] = le.transform(train['brand_region'])
+test['brand_region_enc'] = le.transform(test['brand_region'])
+
+# 对model_region进行编码
+combined_model_region = pd.concat([train['model_region'], test['model_region']])
+le.fit(combined_model_region)
+train['model_region_enc'] = le.transform(train['model_region'])
+test['model_region_enc'] = le.transform(test['model_region'])
+
+# 添加新特征到feature_cols
+new_features = ['power_km_ratio', 'power_age_ratio', 'km_age_ratio', 
+                'brand_avg_power', 'region_avg_age', 'brand_model_avg_price',
+                'brand_model_enc', 'brand_region_enc', 'model_region_enc']
+feature_cols.extend(new_features)
+
+print(f'新增的特征组合: {new_features}')
+
+# 清理临时列
+train = train.drop(['brand_model', 'brand_region', 'model_region'], axis=1)
+test = test.drop(['brand_model', 'brand_region', 'model_region'], axis=1)
 
 ## 提前特征列，标签列构造训练样本和测试样本
 X_train = train[feature_cols]
