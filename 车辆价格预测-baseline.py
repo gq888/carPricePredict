@@ -234,6 +234,27 @@ print(f'power最大值: {train["power"].max()}')
 print(f'power大于600的样本数: {len(train[train["power"] > 600])}')
 print(f'使用的截断值: {power_upper}')
 
+# Cell 12
+## 2.3 特征组合与特征选择
+print('\n=== 特征组合与特征选择 ===')
+
+# 创建特征组合
+print('\n1. 创建特征组合')
+train['power_km_ratio'] = train['power'] / (train['km'] + 1)  # +1避免除零
+test['power_km_ratio'] = test['power'] / (test['km'] + 1)
+
+# 创建其他可能的特征组合
+train['power_age_ratio'] = train['power'] / (train['car_age_days'] + 1)
+test['power_age_ratio'] = test['power'] / (test['car_age_days'] + 1)
+
+train['km_age_ratio'] = train['km'] / (train['car_age_days'] + 1)
+test['km_age_ratio'] = test['km'] / (test['car_age_days'] + 1)
+
+print(f'新增的特征组合: power_km_ratio, power_age_ratio, km_age_ratio')
+
+# 更新特征列列表
+feature_cols.extend(['power_km_ratio', 'power_age_ratio', 'km_age_ratio'])
+
 ## 提前特征列，标签列构造训练样本和测试样本
 X_train = train[feature_cols]
 y_train =train['price']
@@ -286,16 +307,57 @@ else:
 print('\n填充后训练集形状:', X_train.shape)
 print('填充后测试集形状:', X_test.shape)
 
-# Cell 13
-## One-Hot编码处理类别特征
+# 2. 基于XGBoost的特征重要性评估和选择
+print('\n2. 特征重要性评估与选择')
 
-# Cell 14
+# 导入必要的库
 import xgboost as xgb
 from xgboost import XGBRegressor
 from sklearn.model_selection import cross_val_score, GridSearchCV
 
 # 创建XGBoost模型对象
 model = XGBRegressor(objective='reg:squarederror', n_estimators=100, random_state=42)
+
+# 先训练一个基础模型用于特征重要性评估
+temp_model = XGBRegressor(objective='reg:squarederror', n_estimators=100, random_state=42)
+temp_model.fit(X_train, y_train)
+
+# 获取特征重要性
+importances = temp_model.feature_importances_
+feature_importance_df = pd.DataFrame({'feature': feature_cols, 'importance': importances})
+feature_importance_df = feature_importance_df.sort_values('importance', ascending=False)
+
+print('\n特征重要性排序（前20名）:')
+print(feature_importance_df.head(20))
+
+# 选择重要特征（重要性大于0的特征）
+selected_features_idx = np.where(importances > 0)[0]
+
+# 如果选择的特征数量过多，限制最大数量
+max_features = 30
+if len(selected_features_idx) > max_features:
+    selected_features_idx = selected_features_idx[:max_features]
+
+selected_features = [feature_cols[i] for i in selected_features_idx]
+print(f'\n选择的特征数量: {len(selected_features)}')
+print(f'选择的特征: {selected_features}')
+
+# 更新训练集和测试集，只保留选择的特征
+X_train_selected = X_train[:, selected_features_idx]
+X_test_selected = X_test[:, selected_features_idx]
+
+# 如果没有选择到特征，使用所有特征
+if X_train_selected.shape[1] == 0:
+    X_train_selected = X_train
+    X_test_selected = X_test
+    print('未选择到重要特征，使用所有特征')
+else:
+    X_train = X_train_selected
+    X_test = X_test_selected
+    print(f'特征选择后训练集形状: {X_train.shape}')
+    print(f'特征选择后测试集形状: {X_test.shape}')
+
+# Cell 15
 
 # 5折交叉验证评估模型
 print("开始5折交叉验证...")
