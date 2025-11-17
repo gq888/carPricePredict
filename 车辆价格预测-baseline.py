@@ -135,22 +135,72 @@ feature_cols = [
 ]
 feature_cols = [col for col in feature_cols if 'Type' not in col]
 
+## 异常值处理
+# power特征存在严重异常值，进行处理
+print('\n异常值处理前:')
+print(f'power最大值: {train["power"].max()}')
+print(f'power大于600的样本数: {len(train[train["power"] > 600])}')
+
+# 使用99.9%分位数截断power异常值
+power_upper = train['power'].quantile(0.999)
+train.loc[train['power'] > power_upper, 'power'] = power_upper
+test.loc[test['power'] > power_upper, 'power'] = power_upper
+
+print('\n异常值处理后:')
+print(f'power最大值: {train["power"].max()}')
+print(f'power大于600的样本数: {len(train[train["power"] > 600])}')
+print(f'使用的截断值: {power_upper}')
+
 ## 提前特征列，标签列构造训练样本和测试样本
 X_train = train[feature_cols]
 y_train =train['price']
 
 X_test = test[feature_cols]
 
-print('X train shape:', X_train.shape)
+print('\nX train shape:', X_train.shape)
 print('X test shape:', X_test.shape)
 
 # Cell 12
 from sklearn.impute import SimpleImputer
+import numpy as np
 
-# 使用均值填充数值型缺失值
-imputer = SimpleImputer(strategy='mean')  # 也可用'median'或'most_frequent'
-X_train = imputer.fit_transform(X_train)
-X_test = imputer.transform(X_test)  # 对测试集使用相同的填充值
+# 查看缺失值情况
+print('缺失值情况:')
+print(train[feature_cols].isnull().sum())
+
+# 针对不同类型特征采用差异化的缺失值填充策略
+# 分离离散型和连续型特征
+# gearbox虽然是float64类型，但从业务角度看是离散型特征（手动：0，自动：1）
+categorical_cols = ['gearbox']
+continuous_cols = [col for col in feature_cols if col not in categorical_cols]
+
+# 离散型特征使用众数填充
+if categorical_cols:
+    cat_imputer = SimpleImputer(strategy='most_frequent')
+    X_train_cat = cat_imputer.fit_transform(train[categorical_cols])
+    X_test_cat = cat_imputer.transform(test[categorical_cols])
+    print(f'离散型特征 {categorical_cols} 使用众数填充，众数为: {cat_imputer.statistics_[0]}')
+
+# 连续型特征使用中位数填充（减少异常值影响）
+if continuous_cols:
+    cont_imputer = SimpleImputer(strategy='median')
+    X_train_cont = cont_imputer.fit_transform(train[continuous_cols])
+    X_test_cont = cont_imputer.transform(test[continuous_cols])
+    print(f'连续型特征 {continuous_cols} 使用中位数填充')
+
+# 合并特征
+if categorical_cols and continuous_cols:
+    X_train = np.hstack((X_train_cont, X_train_cat))
+    X_test = np.hstack((X_test_cont, X_test_cat))
+elif categorical_cols:
+    X_train = X_train_cat
+    X_test = X_test_cat
+else:
+    X_train = X_train_cont
+    X_test = X_test_cont
+
+print('\n填充后训练集形状:', X_train.shape)
+print('填充后测试集形状:', X_test.shape)
 
 # Cell 13
 import xgboost as xgb
