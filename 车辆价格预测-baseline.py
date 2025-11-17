@@ -123,12 +123,53 @@ train.columns
 
 # 时间特征提取
 print('\n开始时间特征提取...')
-# 将int64类型的日期转换为datetime类型
-train['regDate'] = pd.to_datetime(train['regDate'], format='%Y%m%d', errors='coerce')
-test['regDate'] = pd.to_datetime(test['regDate'], format='%Y%m%d', errors='coerce')
 
-train['creatDate'] = pd.to_datetime(train['creatDate'], format='%Y%m%d', errors='coerce')
-test['creatDate'] = pd.to_datetime(test['creatDate'], format='%Y%m%d', errors='coerce')
+# 处理日期转换的辅助函数
+def process_date(date_str, format='%Y%m%d'):
+    try:
+        return pd.to_datetime(date_str, format=format)
+    except (ValueError, TypeError):
+        # 处理特殊情况：月份为00的情况（如20110010）
+        if len(str(date_str)) == 8:
+            year = str(date_str)[:4]
+            month = str(date_str)[4:6]
+            day = str(date_str)[6:8]
+            
+            # 如果月份为00，设置为01
+            if month == '00':
+                month = '01'
+                corrected_date = f"{year}{month}{day}"
+                try:
+                    return pd.to_datetime(corrected_date, format=format)
+                except:
+                    return pd.NaT
+            
+            # 处理20220229（2022年不是闰年）的情况
+            if date_str == '20220229':
+                return pd.to_datetime('20220228', format=format)
+        return pd.NaT
+
+# 转换日期列
+train['regDate_str'] = train['regDate'].astype(str)
+train['regDate'] = train['regDate_str'].apply(process_date)
+
+# 对测试集进行相同处理
+test['regDate_str'] = test['regDate'].astype(str)
+test['regDate'] = test['regDate_str'].apply(process_date)
+
+train['creatDate_str'] = train['creatDate'].astype(str)
+train['creatDate'] = train['creatDate_str'].apply(process_date)
+
+test['creatDate_str'] = test['creatDate'].astype(str)
+test['creatDate'] = test['creatDate_str'].apply(process_date)
+
+# 查看转换结果
+print(f"regDate转换成功: {train['regDate'].notna().sum()}/{len(train)}")
+print(f"creatDate转换成功: {train['creatDate'].notna().sum()}/{len(train)}")
+
+# 清理临时字符串列
+train = train.drop(['regDate_str', 'creatDate_str'], axis=1)
+test = test.drop(['regDate_str', 'creatDate_str'], axis=1)
 
 # 从regDate提取特征：年份、月份、季度
 train['reg_year'] = train['regDate'].dt.year
