@@ -448,12 +448,153 @@ final_train_r2 = r2_score(y_train, y_pred_train)
 print(f'最终训练集R2分数: {final_train_r2}')
 
 # Cell 18 (Markdown)
-# 后面的代码不建议修改。
+# 4.2 模型集成
+
+# Cell 18
+print('\n=== 模型集成 ===')
+
+# 训练多个不同参数的XGBoost模型
+print('开始训练多个模型...')
+
+# 模型1: 使用最佳参数
+model1 = XGBRegressor(
+    objective='reg:squarederror',
+    random_state=42,
+    **random_search.best_params_
+)
+model1.fit(X_train, y_train)
+
+# 模型2: 增加树深度，减少迭代次数
+model2 = XGBRegressor(
+    objective='reg:squarederror',
+    n_estimators=300,
+    max_depth=7,
+    learning_rate=0.1,
+    subsample=0.9,
+    colsample_bytree=0.9,
+    random_state=43
+)
+model2.fit(X_train, y_train)
+
+# 模型3: 减少树深度，增加迭代次数
+model3 = XGBRegressor(
+    objective='reg:squarederror',
+    n_estimators=600,
+    max_depth=4,
+    learning_rate=0.08,
+    subsample=0.8,
+    colsample_bytree=0.8,
+    random_state=44
+)
+model3.fit(X_train, y_train)
+
+# 模型4: 使用早停的模型（已训练）
+
+# 融合预测结果
+print('开始融合预测结果...')
+y_pred_test1 = model1.predict(X_test)
+y_pred_test2 = model2.predict(X_test)
+y_pred_test3 = model3.predict(X_test)
+y_pred_test4 = y_pred_test  # 早停模型的预测结果
+
+# 使用简单平均融合
+y_pred_ensemble = (y_pred_test1 + y_pred_test2 + y_pred_test3 + y_pred_test4) / 4
+
+# 评估融合模型在训练集上的效果
+y_pred_train1 = model1.predict(X_train)
+y_pred_train2 = model2.predict(X_train)
+y_pred_train3 = model3.predict(X_train)
+y_pred_train4 = y_pred_train  # 早停模型的预测结果
+y_pred_train_ensemble = (y_pred_train1 + y_pred_train2 + y_pred_train3 + y_pred_train4) / 4
+ensemble_train_r2 = r2_score(y_train, y_pred_train_ensemble)
+print(f'集成模型训练集R2分数: {ensemble_train_r2}')
+
+# Cell 18 (Markdown)
+# 5. 评估与分析优化
+
+# Cell 19
+print('\n=== 5.1 误差分析 ===')
+
+# 计算残差
+train_with_predictions = train.copy()
+train_with_predictions['pred_price'] = y_pred_train_ensemble
+train_with_predictions['residual'] = train_with_predictions['price'] - train_with_predictions['pred_price']
+train_with_predictions['abs_residual'] = train_with_predictions['residual'].abs()
+
+# 分析残差与重要特征的关系
+print('分析残差与重要特征的关系...')
+
+# 保存残差分布图
+plt.figure(figsize=(12, 6))
+plt.scatter(train_with_predictions['power'], train_with_predictions['abs_residual'], alpha=0.5)
+plt.xlabel('功率')
+plt.ylabel('绝对残差')
+plt.title('功率与预测残差的关系')
+plt.savefig('residual_vs_power.png')
+print('残差与功率的关系图已保存为 residual_vs_power.png')
+
+plt.figure(figsize=(12, 6))
+plt.scatter(train_with_predictions['km'], train_with_predictions['abs_residual'], alpha=0.5)
+plt.xlabel('里程')
+plt.ylabel('绝对残差')
+plt.title('里程与预测残差的关系')
+plt.savefig('residual_vs_km.png')
+print('残差与里程的关系图已保存为 residual_vs_km.png')
+
+plt.figure(figsize=(12, 6))
+plt.scatter(train_with_predictions['car_age_days'], train_with_predictions['abs_residual'], alpha=0.5)
+plt.xlabel('车龄（天）')
+plt.ylabel('绝对残差')
+plt.title('车龄与预测残差的关系')
+plt.savefig('residual_vs_car_age.png')
+print('残差与车龄的关系图已保存为 residual_vs_car_age.png')
+
+# 查看误差最大的样本
+top_error_samples = train_with_predictions.sort_values('abs_residual', ascending=False).head(20)
+print("\n误差最大的样本：")
+print(top_error_samples[['price', 'pred_price', 'residual', 'abs_residual', 'power', 'km', 'car_age_days']])
+
+# Cell 20
+print('\n=== 5.2 多指标评估 ===')
+
+# 导入所需的评估指标
+from sklearn.metrics import mean_absolute_error
+
+# 计算多种评估指标
+r2 = ensemble_train_r2
+mae = mean_absolute_error(y_train, y_pred_train_ensemble)
+mse = mean_squared_error(y_train, y_pred_train_ensemble)
+rmse = np.sqrt(mse)
+mape = np.mean(np.abs((y_train - y_pred_train_ensemble) / y_train)) * 100
+
+print(f"集成模型性能评估：")
+print(f"R2分数: {r2:.4f}")
+print(f"MAE: {mae:.4f}")
+print(f"RMSE: {rmse:.4f}")
+print(f"MAPE: {mape:.2f}%")
+
+# 对比各个模型的性能
+print('\n各模型性能对比：')
+
+# 计算单个模型的性能
+models = [
+    ('最佳参数模型', y_pred_train1),
+    ('深度7模型', y_pred_train2),
+    ('深度4模型', y_pred_train3),
+    ('早停模型', y_pred_train4),
+    ('集成模型', y_pred_train_ensemble)
+]
+
+for model_name, y_pred in models:
+    r2 = r2_score(y_train, y_pred)
+    mae = mean_absolute_error(y_train, y_pred)
+    rmse = np.sqrt(mean_squared_error(y_train, y_pred))
+    print(f"{model_name}: R2={r2:.4f}, MAE={mae:.4f}, RMSE={rmse:.4f}")
 
 # Cell 15
 out_df = pd.DataFrame()
 out_df['ID'] = test['ID']
-out_df['price'] = y_pred_test
+out_df['price'] = y_pred_ensemble
 
 # Cell 16 (Markdown)
 # 务必把StudentId写成自己的学号，否则没有成绩！
