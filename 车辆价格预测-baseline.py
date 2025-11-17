@@ -208,14 +208,15 @@ numerical_cols = train.select_dtypes(exclude = 'object').columns
 print(numerical_cols)
 
 # Cell 11
-## 选择特征列 - 包含新的时间特征
+## 选择特征列 - 包含新的时间特征和Type特征
 feature_cols = [
     col for col in numerical_cols if col not in [
         'ID', 'name', 'regDate', 'creatDate', 'price', 'model', 'brand',
         'regionCode', 'seller'
     ]
 ]
-feature_cols = [col for col in feature_cols if 'Type' not in col]
+# 重新纳入Type特征
+feature_cols.extend(['BType', 'FType'])
 
 ## 异常值处理
 # power特征存在严重异常值，进行处理
@@ -242,7 +243,8 @@ X_test = test[feature_cols]
 print('\nX train shape:', X_train.shape)
 print('X test shape:', X_test.shape)
 
-# Cell 12
+# Cell 13
+## 定义了一个统计函数，方便后续信息统计12
 from sklearn.impute import SimpleImputer
 import numpy as np
 
@@ -252,23 +254,23 @@ print(train[feature_cols].isnull().sum())
 
 # 针对不同类型特征采用差异化的缺失值填充策略
 # 分离离散型和连续型特征
-# gearbox虽然是float64类型，但从业务角度看是离散型特征（手动：0，自动：1）
-categorical_cols = ['gearbox']
+# 虽然是float64类型，但从业务角度看是离散型特征
+categorical_cols = []
 continuous_cols = [col for col in feature_cols if col not in categorical_cols]
 
-# 离散型特征使用均值填充
+# 离散型特征使用众数填充（保持离散性质，适合One-Hot编码）
 if categorical_cols:
-    cat_imputer = SimpleImputer(strategy='mean')
+    cat_imputer = SimpleImputer(strategy='most_frequent')
     X_train_cat = cat_imputer.fit_transform(train[categorical_cols])
     X_test_cat = cat_imputer.transform(test[categorical_cols])
-    print(f'离散型特征 {categorical_cols} 使用均值填充，均值为: {cat_imputer.statistics_[0]}')
+    print(f'离散型特征 {categorical_cols} 使用众数填充，众数为: {cat_imputer.statistics_}')
 
-# 连续型特征使用中位数填充（减少异常值影响）
+# 连续型特征使用均值填充（减少异常值影响）
 if continuous_cols:
-    cont_imputer = SimpleImputer(strategy='median')
+    cont_imputer = SimpleImputer(strategy='mean')
     X_train_cont = cont_imputer.fit_transform(train[continuous_cols])
     X_test_cont = cont_imputer.transform(test[continuous_cols])
-    print(f'连续型特征 {continuous_cols} 使用中位数填充')
+    print(f'连续型特征 {continuous_cols} 使用均值填充，均值为: {cont_imputer.statistics_}')
 
 # 合并特征
 if categorical_cols and continuous_cols:
@@ -285,6 +287,9 @@ print('\n填充后训练集形状:', X_train.shape)
 print('填充后测试集形状:', X_test.shape)
 
 # Cell 13
+## One-Hot编码处理类别特征
+
+# Cell 14
 import xgboost as xgb
 from xgboost import XGBRegressor
 from sklearn.model_selection import cross_val_score, GridSearchCV
