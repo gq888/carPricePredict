@@ -402,15 +402,52 @@ random_search.fit(X_train, y_train)
 print('最佳参数:', random_search.best_params_)
 print('最佳交叉验证R2分数:', random_search.best_score_)
 
-# 使用最佳参数的模型重新训练
-best_model = random_search.best_estimator_
-# 在训练集上评估模型
-y_pred_train = best_model.predict(X_train)
-y_pred_test = best_model.predict(X_test)
-r2_score_train = r2_score(y_train, y_pred_train)
-print('训练集R2分数:', r2_score_train)
+# Cell 17
+## 4.1 实现早停策略
+print('\n=== 实现早停策略 ===')
 
-# Cell 14 (Markdown)
+from sklearn.model_selection import train_test_split
+
+# 划分训练集和验证集
+X_train_part, X_val, y_train_part, y_val = train_test_split(
+    X_train, y_train, test_size=0.2, random_state=42
+)
+
+# 使用最佳参数并增加迭代次数，设置早停
+# 复制最佳参数并更新n_estimators
+best_params_with_early_stopping = random_search.best_params_.copy()
+best_params_with_early_stopping['n_estimators'] = 1000  # 增加迭代次数
+
+model_with_early_stopping = XGBRegressor(
+    objective='reg:squarederror',
+    random_state=42,
+    **best_params_with_early_stopping
+)
+
+print('开始训练带早停的模型...')
+model_with_early_stopping.fit(
+    X_train_part, y_train_part,
+    eval_set=[(X_val, y_val)],
+    early_stopping_rounds=50,
+    verbose=False  # 关闭训练过程输出
+)
+
+# 在训练集和验证集上评估模型
+y_pred_train_part = model_with_early_stopping.predict(X_train_part)
+y_pred_val = model_with_early_stopping.predict(X_val)
+train_r2 = r2_score(y_train_part, y_pred_train_part)
+val_r2 = r2_score(y_val, y_pred_val)
+print(f'带早停的训练集R2分数: {train_r2}')
+print(f'带早停的验证集R2分数: {val_r2}')
+print(f'早停时的迭代次数: {model_with_early_stopping.best_iteration}')
+
+# 使用带早停的模型进行最终预测
+y_pred_train = model_with_early_stopping.predict(X_train)
+y_pred_test = model_with_early_stopping.predict(X_test)
+final_train_r2 = r2_score(y_train, y_pred_train)
+print(f'最终训练集R2分数: {final_train_r2}')
+
+# Cell 18 (Markdown)
 # 后面的代码不建议修改。
 
 # Cell 15
