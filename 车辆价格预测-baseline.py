@@ -99,6 +99,10 @@ from sklearn.model_selection import cross_val_score
 import warnings
 warnings.filterwarnings('ignore')
 
+# 导入LightGBM
+import lightgbm as lgb
+from lightgbm import LGBMRegressor
+
 # Cell 5
 ## 通过Pandas对于数据进行读取 (pandas是一个很友好的数据读取函数库)
 train = pd.read_csv('data/train.csv')
@@ -453,10 +457,10 @@ print(f'最终训练集R2分数: {final_train_r2}')
 # Cell 18
 print('\n=== 模型集成 ===')
 
-# 训练多个不同参数的XGBoost模型
+# 训练多个不同参数的模型（包括LightGBM）
 print('开始训练多个模型...')
 
-# 模型1: 使用最佳参数
+# 模型1: XGBoost - 使用最佳参数
 model1 = XGBRegressor(
     objective='reg:squarederror',
     random_state=42,
@@ -464,7 +468,7 @@ model1 = XGBRegressor(
 )
 model1.fit(X_train, y_train)
 
-# 模型2: 增加树深度，减少迭代次数
+# 模型2: XGBoost - 增加树深度，减少迭代次数
 model2 = XGBRegressor(
     objective='reg:squarederror',
     n_estimators=300,
@@ -476,7 +480,7 @@ model2 = XGBRegressor(
 )
 model2.fit(X_train, y_train)
 
-# 模型3: 减少树深度，增加迭代次数
+# 模型3: XGBoost - 减少树深度，增加迭代次数
 model3 = XGBRegressor(
     objective='reg:squarederror',
     n_estimators=600,
@@ -488,24 +492,79 @@ model3 = XGBRegressor(
 )
 model3.fit(X_train, y_train)
 
-# 模型4: 使用早停的模型（已训练）
+# 模型4: XGBoost - 使用早停的模型（已训练）
 
-# 融合预测结果
+# 模型5: LightGBM模型
+print('训练LightGBM模型...')
+model5 = LGBMRegressor(
+    objective='regression',
+    n_estimators=500,
+    learning_rate=0.1,
+    max_depth=5,
+    subsample=0.9,
+    colsample_bytree=0.9,
+    random_state=45
+)
+model5.fit(X_train, y_train)
+
+# 计算各模型的预测结果
 print('开始融合预测结果...')
 y_pred_test1 = model1.predict(X_test)
 y_pred_test2 = model2.predict(X_test)
 y_pred_test3 = model3.predict(X_test)
 y_pred_test4 = y_pred_test  # 早停模型的预测结果
+y_pred_test5 = model5.predict(X_test)  # LightGBM模型的预测结果
 
-# 使用简单平均融合
-y_pred_ensemble = (y_pred_test1 + y_pred_test2 + y_pred_test3 + y_pred_test4) / 4
-
-# 评估融合模型在训练集上的效果
+# 计算各模型的训练集R2分数作为权重
 y_pred_train1 = model1.predict(X_train)
 y_pred_train2 = model2.predict(X_train)
 y_pred_train3 = model3.predict(X_train)
 y_pred_train4 = y_pred_train  # 早停模型的预测结果
-y_pred_train_ensemble = (y_pred_train1 + y_pred_train2 + y_pred_train3 + y_pred_train4) / 4
+y_pred_train5 = model5.predict(X_train)  # LightGBM模型的预测结果
+
+# 计算各模型的R2分数
+r2_1 = r2_score(y_train, y_pred_train1)
+r2_2 = r2_score(y_train, y_pred_train2)
+r2_3 = r2_score(y_train, y_pred_train3)
+r2_4 = r2_score(y_train, y_pred_train4)
+r2_5 = r2_score(y_train, y_pred_train5)
+
+# 显示各模型的R2分数
+print(f'\n各模型R2分数：')
+print(f'模型1 (XGB最佳参数): {r2_1:.4f}')
+print(f'模型2 (XGB深度7): {r2_2:.4f}')
+print(f'模型3 (XGB深度4): {r2_3:.4f}')
+print(f'模型4 (XGB早停): {r2_4:.4f}')
+print(f'模型5 (LightGBM): {r2_5:.4f}')
+
+# 计算加权平均权重（使用R2分数作为权重）
+total_r2 = r2_1 + r2_2 + r2_3 + r2_4 + r2_5
+weight1 = r2_1 / total_r2
+weight2 = r2_2 / total_r2
+weight3 = r2_3 / total_r2
+weight4 = r2_4 / total_r2
+weight5 = r2_5 / total_r2
+
+print(f'\n各模型权重：')
+print(f'模型1权重: {weight1:.4f}')
+print(f'模型2权重: {weight2:.4f}')
+print(f'模型3权重: {weight3:.4f}')
+print(f'模型4权重: {weight4:.4f}')
+print(f'模型5权重: {weight5:.4f}')
+
+# 使用加权平均融合
+y_pred_ensemble = (y_pred_test1 * weight1 + 
+                  y_pred_test2 * weight2 + 
+                  y_pred_test3 * weight3 + 
+                  y_pred_test4 * weight4 + 
+                  y_pred_test5 * weight5)
+
+# 评估融合模型在训练集上的效果
+y_pred_train_ensemble = (y_pred_train1 * weight1 + 
+                        y_pred_train2 * weight2 + 
+                        y_pred_train3 * weight3 + 
+                        y_pred_train4 * weight4 + 
+                        y_pred_train5 * weight5)
 ensemble_train_r2 = r2_score(y_train, y_pred_train_ensemble)
 print(f'集成模型训练集R2分数: {ensemble_train_r2}')
 
@@ -582,6 +641,7 @@ models = [
     ('深度7模型', y_pred_train2),
     ('深度4模型', y_pred_train3),
     ('早停模型', y_pred_train4),
+    ('LightGBM模型', y_pred_train5),
     ('集成模型', y_pred_train_ensemble)
 ]
 
