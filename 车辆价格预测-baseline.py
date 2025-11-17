@@ -155,15 +155,45 @@ X_test = imputer.transform(X_test)  # 对测试集使用相同的填充值
 # Cell 13
 import xgboost as xgb
 from xgboost import XGBRegressor
+from sklearn.model_selection import cross_val_score, GridSearchCV
+
 # 创建XGBoost模型对象
 model = XGBRegressor(objective='reg:squarederror', n_estimators=100, random_state=42)
 
-model.fit(X_train, y_train)
-y_pred_train = model.predict(X_train)
-y_pred_test = model.predict(X_test)
+# 5折交叉验证评估模型
+print("开始5折交叉验证...")
+cv_scores = cross_val_score(model, X_train, y_train, cv=5, scoring='r2')
+print("交叉验证R2分数:", cv_scores)
+print("平均R2分数:", cv_scores.mean())
+print("R2分数标准差:", cv_scores.std())
+
+# 可选：超参数网格搜索优化
+print("\n开始超参数网格搜索...")
+param_grid = {
+    'n_estimators': [100, 200],
+    'max_depth': [3, 5, 7],
+    'learning_rate': [0.01, 0.1]
+}
+
+# 使用GridSearchCV进行超参数优化
+grid_search = GridSearchCV(estimator=XGBRegressor(objective='reg:squarederror', random_state=42),
+                           param_grid=param_grid,
+                           cv=3,
+                           scoring='r2',
+                           n_jobs=-1)
+
+grid_search.fit(X_train, y_train)
+
+# 输出最佳参数和最佳分数
+print("最佳参数:", grid_search.best_params_)
+print("最佳交叉验证R2分数:", grid_search.best_score_)
+
+# 使用最佳模型进行预测
+best_model = grid_search.best_estimator_
+y_pred_train = best_model.predict(X_train)
+y_pred_test = best_model.predict(X_test)
 r2_score_train = r2_score(y_train, y_pred_train)
-## 因为只有训练集有标签，只能生成训练集的分数
-print('R2_score (train): ', r2_score_train)
+print('训练集R2分数:', r2_score_train)
 
 # Cell 14 (Markdown)
 # 后面的代码不建议修改。
