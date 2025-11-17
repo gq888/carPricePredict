@@ -367,28 +367,44 @@ print("平均R2分数:", cv_scores.mean())
 print("R2分数标准差:", cv_scores.std())
 
 # 可选：超参数网格搜索优化
-print("\n开始超参数网格搜索...")
-param_grid = {
-    'n_estimators': [100, 200],
-    'max_depth': [3, 5, 7],
-    'learning_rate': [0.01, 0.1]
+## 3.1 模型调优 - 扩展超参数搜索范围
+print('\n=== 模型调优 - 扩展超参数搜索范围 ===')
+
+# 使用RandomizedSearchCV代替GridSearchCV进行更全面的超参数搜索
+from sklearn.model_selection import RandomizedSearchCV
+
+# 扩展超参数搜索空间
+param_dist = {
+    'n_estimators': [100, 200, 300, 400, 500],
+    'learning_rate': [0.01, 0.05, 0.1, 0.15, 0.2],
+    'max_depth': [3, 5, 7, 9, 11],
+    'subsample': [0.6, 0.7, 0.8, 0.9, 1.0],
+    'colsample_bytree': [0.6, 0.7, 0.8, 0.9, 1.0],
+    'gamma': [0, 0.1, 0.2, 0.3, 0.4],
+    'reg_alpha': [0, 0.1, 0.5, 1.0],
+    'reg_lambda': [0.1, 0.5, 1.0, 2.0]
 }
 
-# 使用GridSearchCV进行超参数优化
-grid_search = GridSearchCV(estimator=XGBRegressor(objective='reg:squarederror', random_state=42),
-                           param_grid=param_grid,
-                           cv=3,
-                           scoring='r2',
-                           n_jobs=-1)
+# 使用RandomizedSearchCV进行超参数搜索
+print('开始超参数随机搜索...')
+random_search = RandomizedSearchCV(
+    estimator=model,
+    param_distributions=param_dist,
+    n_iter=50,  # 搜索的参数组合数量
+    cv=5,
+    scoring='r2',
+    n_jobs=-1,
+    random_state=42
+)
+random_search.fit(X_train, y_train)
 
-grid_search.fit(X_train, y_train)
+# 输出最佳参数和最佳得分
+print('最佳参数:', random_search.best_params_)
+print('最佳交叉验证R2分数:', random_search.best_score_)
 
-# 输出最佳参数和最佳分数
-print("最佳参数:", grid_search.best_params_)
-print("最佳交叉验证R2分数:", grid_search.best_score_)
-
-# 使用最佳模型进行预测
-best_model = grid_search.best_estimator_
+# 使用最佳参数的模型重新训练
+best_model = random_search.best_estimator_
+# 在训练集上评估模型
 y_pred_train = best_model.predict(X_train)
 y_pred_test = best_model.predict(X_test)
 r2_score_train = r2_score(y_train, y_pred_train)
