@@ -256,12 +256,12 @@ print(train[feature_cols].isnull().sum())
 categorical_cols = ['gearbox']
 continuous_cols = [col for col in feature_cols if col not in categorical_cols]
 
-# 离散型特征使用众数填充
+# 离散型特征使用均值填充
 if categorical_cols:
-    cat_imputer = SimpleImputer(strategy='most_frequent')
+    cat_imputer = SimpleImputer(strategy='mean')
     X_train_cat = cat_imputer.fit_transform(train[categorical_cols])
     X_test_cat = cat_imputer.transform(test[categorical_cols])
-    print(f'离散型特征 {categorical_cols} 使用众数填充，众数为: {cat_imputer.statistics_[0]}')
+    print(f'离散型特征 {categorical_cols} 使用均值填充，均值为: {cat_imputer.statistics_[0]}')
 
 # 连续型特征使用中位数填充（减少异常值影响）
 if continuous_cols:
