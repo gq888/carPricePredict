@@ -121,12 +121,53 @@ train.head()
 ## 通过 .columns 查看列名
 train.columns
 
+# 时间特征提取
+print('\n开始时间特征提取...')
+# 将int64类型的日期转换为datetime类型
+train['regDate'] = pd.to_datetime(train['regDate'], format='%Y%m%d', errors='coerce')
+test['regDate'] = pd.to_datetime(test['regDate'], format='%Y%m%d', errors='coerce')
+
+train['creatDate'] = pd.to_datetime(train['creatDate'], format='%Y%m%d', errors='coerce')
+test['creatDate'] = pd.to_datetime(test['creatDate'], format='%Y%m%d', errors='coerce')
+
+# 从regDate提取特征：年份、月份、季度
+train['reg_year'] = train['regDate'].dt.year
+train['reg_month'] = train['regDate'].dt.month
+train['reg_quarter'] = train['regDate'].dt.quarter
+
+# 从creatDate提取特征：年份、月份、季度、星期几
+train['creat_year'] = train['creatDate'].dt.year
+train['creat_month'] = train['creatDate'].dt.month
+train['creat_quarter'] = train['creatDate'].dt.quarter
+train['creat_dayofweek'] = train['creatDate'].dt.dayofweek
+
+# 计算车辆使用年限（天）
+train['car_age_days'] = (train['creatDate'] - train['regDate']).dt.days
+
+# 对测试集进行相同的特征提取
+test['reg_year'] = test['regDate'].dt.year
+test['reg_month'] = test['regDate'].dt.month
+test['reg_quarter'] = test['regDate'].dt.quarter
+
+test['creat_year'] = test['creatDate'].dt.year
+test['creat_month'] = test['creatDate'].dt.month
+test['creat_quarter'] = test['creatDate'].dt.quarter
+test['creat_dayofweek'] = test['creatDate'].dt.dayofweek
+
+test['car_age_days'] = (test['creatDate'] - test['regDate']).dt.days
+
+# 查看新添加的时间特征
+time_features = ['reg_year', 'reg_month', 'reg_quarter', 'creat_year', 'creat_month', 'creat_quarter', 'creat_dayofweek', 'car_age_days']
+print('添加的时间特征:', time_features)
+print('时间特征示例:')
+print(train[time_features].head())
+
 # Cell 10
 numerical_cols = train.select_dtypes(exclude = 'object').columns
 print(numerical_cols)
 
 # Cell 11
-## 选择特征列
+## 选择特征列 - 包含新的时间特征
 feature_cols = [
     col for col in numerical_cols if col not in [
         'ID', 'name', 'regDate', 'creatDate', 'price', 'model', 'brand',
