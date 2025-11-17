@@ -153,9 +153,10 @@ X_train = imputer.fit_transform(X_train)
 X_test = imputer.transform(X_test)  # 对测试集使用相同的填充值
 
 # Cell 13
-from sklearn.linear_model import LinearRegression
-# 创建模型对象
-model = LinearRegression()
+import xgboost as xgb
+from xgboost import XGBRegressor
+# 创建XGBoost模型对象
+model = XGBRegressor(objective='reg:squarederror', n_estimators=100, random_state=42)
 
 model.fit(X_train, y_train)
 y_pred_train = model.predict(X_train)
