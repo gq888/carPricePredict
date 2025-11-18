@@ -103,6 +103,35 @@ warnings.filterwarnings('ignore')
 import lightgbm as lgb
 from lightgbm import LGBMRegressor
 
+# 导入CatBoost
+from catboost import CatBoostRegressor
+
+# 导入RandomForest
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.preprocessing import LabelEncoder
+from sklearn.impute import SimpleImputer
+import numpy as np
+
+# 导入必要的库
+import xgboost as xgb
+from xgboost import XGBRegressor
+from sklearn.model_selection import cross_val_score, GridSearchCV
+from sklearn.feature_selection import mutual_info_regression, SelectKBest, RFE
+from sklearn.linear_model import LinearRegression
+
+# 简单的数据增强：随机采样增强
+from sklearn.utils import resample
+
+# 使用RandomizedSearchCV代替GridSearchCV进行更全面的超参数搜索
+from sklearn.model_selection import RandomizedSearchCV
+
+from sklearn.model_selection import train_test_split
+from sklearn.ensemble import StackingRegressor
+from sklearn.linear_model import LinearRegression
+
+# 导入所需的评估指标
+from sklearn.metrics import mean_absolute_error
+
 # Cell 5
 ## 通过Pandas对于数据进行读取 (pandas是一个很友好的数据读取函数库)
 train = pd.read_csv('data/train.csv')
@@ -305,10 +334,9 @@ test['brand_model_avg_price'] = test.set_index(['brand', 'carModel']).index.map(
 
 # 将新特征转换为数值类型
 print('将新特征转换为数值类型...')
-# 对类别组合特征进行标签编码
-from sklearn.preprocessing import LabelEncoder
+# 使用LabelEncoder将组合特征转换为数值类型
 
-# 标签编码器实例
+# 先对训练集和测试集的组合特征进行编码
 le = LabelEncoder()
 
 # 对brand_model进行编码
@@ -329,10 +357,55 @@ le.fit(combined_model_region)
 train['model_region_enc'] = le.transform(train['model_region'])
 test['model_region_enc'] = le.transform(test['model_region'])
 
+print('添加高阶交互特征...')
+# 添加高阶交互特征
+train['power_squared'] = train['power'] ** 2
+test['power_squared'] = test['power'] ** 2
+
+train['power_log'] = np.log(train['power'] + 1)  # +1避免log(0)
+test['power_log'] = np.log(test['power'] + 1)
+
+train['km_log'] = np.log(train['km'] + 1)
+test['km_log'] = np.log(test['km'] + 1)
+
+train['car_age_log'] = np.log(train['car_age_days'] + 1)
+test['car_age_log'] = np.log(test['car_age_days'] + 1)
+
+# 添加更多统计特征
+print('添加更多统计特征...')
+# 品牌-地域平均价格
+brand_region_avg_price = train.groupby(['brand', 'regionCode'])['price'].mean().to_dict()
+train['brand_region_avg_price'] = train.set_index(['brand', 'regionCode']).index.map(brand_region_avg_price)
+test['brand_region_avg_price'] = test.set_index(['brand', 'regionCode']).index.map(brand_region_avg_price)
+
+# 品牌-地域平均功率
+brand_region_avg_power = train.groupby(['brand', 'regionCode'])['power'].mean().to_dict()
+train['brand_region_avg_power'] = train.set_index(['brand', 'regionCode']).index.map(brand_region_avg_power)
+test['brand_region_avg_power'] = test.set_index(['brand', 'regionCode']).index.map(brand_region_avg_power)
+
+# 型号-地域平均车龄
+model_region_avg_age = train.groupby(['carModel', 'regionCode'])['car_age_days'].mean().to_dict()
+train['model_region_avg_age'] = train.set_index(['carModel', 'regionCode']).index.map(model_region_avg_age)
+test['model_region_avg_age'] = test.set_index(['carModel', 'regionCode']).index.map(model_region_avg_age)
+
+# 添加更多交叉特征
+print('添加更多交叉特征...')
+train['power_brand_interaction'] = train['power'] * train['brand']
+test['power_brand_interaction'] = test['power'] * test['brand']
+
+train['km_region_interaction'] = train['km'] * train['regionCode']
+test['km_region_interaction'] = test['km'] * test['regionCode']
+
+train['car_age_brand_interaction'] = train['car_age_days'] * train['brand']
+test['car_age_brand_interaction'] = test['car_age_days'] * test['brand']
+
 # 添加新特征到feature_cols
 new_features = ['power_km_ratio', 'power_age_ratio', 'km_age_ratio', 
                 'brand_avg_power', 'region_avg_age', 'brand_model_avg_price',
-                'brand_model_enc', 'brand_region_enc', 'model_region_enc']
+                'brand_model_enc', 'brand_region_enc', 'model_region_enc',
+                'power_squared', 'power_log', 'km_log', 'car_age_log',
+                'brand_region_avg_price', 'brand_region_avg_power', 'model_region_avg_age',
+                'power_brand_interaction', 'km_region_interaction', 'car_age_brand_interaction']
 feature_cols.extend(new_features)
 
 print(f'新增的特征组合: {new_features}')
@@ -352,8 +425,6 @@ print('X test shape:', X_test.shape)
 
 # Cell 13
 ## 定义了一个统计函数，方便后续信息统计12
-from sklearn.impute import SimpleImputer
-import numpy as np
 
 # 查看缺失值情况
 print('缺失值情况:')
@@ -393,40 +464,66 @@ else:
 print('\n填充后训练集形状:', X_train.shape)
 print('填充后测试集形状:', X_test.shape)
 
-# 2. 基于XGBoost的特征重要性评估和选择
-print('\n2. 特征重要性评估与选择')
-
-# 导入必要的库
-import xgboost as xgb
-from xgboost import XGBRegressor
-from sklearn.model_selection import cross_val_score, GridSearchCV
+# 2. 高级特征选择技术
+print('\n2. 高级特征选择技术')
 
 # 创建XGBoost模型对象
 model = XGBRegressor(objective='reg:squarederror', n_estimators=100, random_state=42)
 
-# 先训练一个基础模型用于特征重要性评估
+# 2.1 互信息特征选择
+print('\n2.1 互信息特征选择')
+# 计算互信息
+mi = mutual_info_regression(X_train, y_train)
+mi_df = pd.DataFrame({'feature': feature_cols, 'mi_score': mi})
+mi_df = mi_df.sort_values('mi_score', ascending=False)
+print('\n互信息特征重要性排序（前20名）:')
+print(mi_df.head(20))
+
+# 2.2 基于XGBoost的特征重要性评估
 temp_model = XGBRegressor(objective='reg:squarederror', n_estimators=100, random_state=42)
 temp_model.fit(X_train, y_train)
-
-# 获取特征重要性
 importances = temp_model.feature_importances_
 feature_importance_df = pd.DataFrame({'feature': feature_cols, 'importance': importances})
 feature_importance_df = feature_importance_df.sort_values('importance', ascending=False)
-
-print('\n特征重要性排序（前20名）:')
+print('\nXGBoost特征重要性排序（前20名）:')
 print(feature_importance_df.head(20))
 
-# 选择重要特征（重要性大于0的特征）
-selected_features_idx = np.where(importances > 0)[0]
+# 2.3 递归特征消除 (RFE)
+print('\n2.3 递归特征消除 (RFE)')
+# 使用线性回归作为基础模型进行RFE
+rfe_selector = RFE(estimator=LinearRegression(), n_features_to_select=25, step=5, verbose=1)
+rfe_selector.fit(X_train, y_train)
+rfe_support = rfe_selector.support_
+
+# 综合三种方法选择特征
+# 1. 互信息前30个特征
+mi_top_features = set(mi_df.head(30)['feature'])
+# 2. XGBoost重要性前30个特征
+xgb_top_features = set(feature_importance_df.head(30)['feature'])
+# 3. RFE选择的特征
+rfe_features = set([feature_cols[i] for i in range(len(rfe_support)) if rfe_support[i]])
+
+# 取三种方法的交集和并集的平衡
+# 先取三种方法都认可的特征
+common_features = mi_top_features & xgb_top_features & rfe_features
+# 再添加两种方法认可的特征
+two_methods_features = (mi_top_features & xgb_top_features) | (mi_top_features & rfe_features) | (xgb_top_features & rfe_features)
+# 最终特征集
+final_feature_set = common_features.union(two_methods_features)
+
+# 将特征名转换为索引
+selected_features_idx = [feature_cols.index(f) for f in final_feature_set if f in feature_cols]
 
 # 如果选择的特征数量过多，限制最大数量
-max_features = 30
+max_features = 35
 if len(selected_features_idx) > max_features:
-    selected_features_idx = selected_features_idx[:max_features]
+    # 按XGBoost重要性排序并取前max_features个
+    xgb_sorted_features = feature_importance_df.head(max_features)['feature'].tolist()
+    selected_features_idx = [feature_cols.index(f) for f in xgb_sorted_features if f in feature_cols]
 
 selected_features = [feature_cols[i] for i in selected_features_idx]
-print(f'\n选择的特征数量: {len(selected_features)}')
-print(f'选择的特征: {selected_features}')
+print(f'\n综合选择的特征数量: {len(selected_features)}')
+print(f'综合选择的特征: {selected_features}')
 
 # 更新训练集和测试集，只保留选择的特征
 X_train_selected = X_train[:, selected_features_idx]
@@ -443,6 +540,24 @@ else:
     print(f'特征选择后训练集形状: {X_train.shape}')
     print(f'特征选择后测试集形状: {X_test.shape}')
 
+# 3. 数据增强技术
+print('\n3. 数据增强技术')
+
+# 生成更多的训练样本
+print(f'原始训练集大小: {X_train.shape[0]}')
+
+# 对训练数据进行重采样（增加数据多样性）
+X_train_augmented, y_train_augmented = resample(X_train, y_train, 
+                                                n_samples=int(X_train.shape[0] * 1.5), 
+                                                random_state=42,
+                                                replace=True)  # 允许重复采样
+
+print(f'增强后训练集大小: {X_train_augmented.shape[0]}')
+
+# 更新训练集为增强后的数据集
+X_train = X_train_augmented
+y_train = y_train_augmented
+
 # Cell 15
 
 # 5折交叉验证评估模型
@@ -456,27 +571,24 @@ print("R2分数标准差:", cv_scores.std())
 ## 3.1 模型调优 - 扩展超参数搜索范围
 print('\n=== 模型调优 - 扩展超参数搜索范围 ===')
 
-# 使用RandomizedSearchCV代替GridSearchCV进行更全面的超参数搜索
-from sklearn.model_selection import RandomizedSearchCV
-
-# 扩展超参数搜索空间
+# 扩展超参数搜索空间 - 更全面的搜索范围
 param_dist = {
-    'n_estimators': [100, 200, 300, 400, 500],
-    'learning_rate': [0.01, 0.05, 0.1, 0.15, 0.2],
-    'max_depth': [3, 5, 7, 9, 11],
-    'subsample': [0.6, 0.7, 0.8, 0.9, 1.0],
-    'colsample_bytree': [0.6, 0.7, 0.8, 0.9, 1.0],
-    'gamma': [0, 0.1, 0.2, 0.3, 0.4],
-    'reg_alpha': [0, 0.1, 0.5, 1.0],
-    'reg_lambda': [0.1, 0.5, 1.0, 2.0]
+    'n_estimators': [100, 200, 300, 400, 500, 600, 700, 800, 900, 1000],  # 扩展迭代次数范围
+    'learning_rate': [0.001, 0.005, 0.01, 0.03, 0.05, 0.07, 0.1, 0.15, 0.2],  # 增加学习率的精细粒度
+    'max_depth': [2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 15],  # 扩展深度范围
+    'subsample': [0.5, 0.6, 0.7, 0.8, 0.9, 0.95, 1.0],  # 增加子样本比例的选项
+    'colsample_bytree': [0.5, 0.6, 0.7, 0.8, 0.9, 0.95, 1.0],  # 增加列采样比例的选项
+    'gamma': [0, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 1.0, 2.0],  # 扩展gamma范围
+    'reg_alpha': [0, 0.001, 0.01, 0.05, 0.1, 0.5, 1.0, 2.0, 5.0],  # 扩展L1正则化范围
+    'reg_lambda': [0.001, 0.01, 0.1, 0.5, 1.0, 2.0, 5.0, 10.0]  # 扩展L2正则化范围
 }
 
-# 使用RandomizedSearchCV进行超参数搜索
+# 使用RandomizedSearchCV进行超参数搜索 - 增加迭代次数
 print('开始超参数随机搜索...')
 random_search = RandomizedSearchCV(
     estimator=model,
     param_distributions=param_dist,
-    n_iter=50,  # 搜索的参数组合数量
+    n_iter=200,  # 显著增加搜索的参数组合数量，从50增加到200
     cv=5,
     scoring='r2',
     n_jobs=-1,
@@ -491,8 +603,6 @@ print('最佳交叉验证R2分数:', random_search.best_score_)
 # Cell 17
 ## 4.1 实现早停策略
 print('\n=== 实现早停策略 ===')
-
-from sklearn.model_selection import train_test_split
 
 # 划分训练集和验证集
 X_train_part, X_val, y_train_part, y_val = train_test_split(
@@ -589,6 +699,34 @@ model5 = LGBMRegressor(
 )
 model5.fit(X_train, y_train)
 
+# 模型6: CatBoost模型
+print('训练CatBoost模型...')
+model6 = CatBoostRegressor(
+    loss_function='RMSE',
+    n_estimators=500,
+    learning_rate=0.1,
+    depth=6,
+    subsample=0.9,
+    colsample_bylevel=0.9,
+    random_state=46,
+    verbose=0  # 关闭训练过程输出
+)
+model6.fit(X_train, y_train)
+
+# 模型7: RandomForest模型
+print('训练RandomForest模型...')
+model7 = RandomForestRegressor(
+    n_estimators=500,
+    max_depth=15,
+    min_samples_split=5,
+    min_samples_leaf=2,
+    max_features='sqrt',
+    bootstrap=True,
+    n_jobs=-1,
+    random_state=47
+)
+model7.fit(X_train, y_train)
+
 # 计算各模型的预测结果
 print('开始融合预测结果...')
 y_pred_test1 = model1.predict(X_test)
@@ -596,6 +734,8 @@ y_pred_test2 = model2.predict(X_test)
 y_pred_test3 = model3.predict(X_test)
 y_pred_test4 = y_pred_test  # 早停模型的预测结果
 y_pred_test5 = model5.predict(X_test)  # LightGBM模型的预测结果
+y_pred_test6 = model6.predict(X_test)  # CatBoost模型的预测结果
+y_pred_test7 = model7.predict(X_test)  # RandomForest模型的预测结果
 
 # 计算各模型的训练集R2分数作为权重
 y_pred_train1 = model1.predict(X_train)
@@ -603,6 +743,8 @@ y_pred_train2 = model2.predict(X_train)
 y_pred_train3 = model3.predict(X_train)
 y_pred_train4 = y_pred_train  # 早停模型的预测结果
 y_pred_train5 = model5.predict(X_train)  # LightGBM模型的预测结果
+y_pred_train6 = model6.predict(X_train)  # CatBoost模型的预测结果
+y_pred_train7 = model7.predict(X_train)  # RandomForest模型的预测结果
 
 # 计算各模型的R2分数
 r2_1 = r2_score(y_train, y_pred_train1)
@@ -610,6 +752,8 @@ r2_2 = r2_score(y_train, y_pred_train2)
 r2_3 = r2_score(y_train, y_pred_train3)
 r2_4 = r2_score(y_train, y_pred_train4)
 r2_5 = r2_score(y_train, y_pred_train5)
+r2_6 = r2_score(y_train, y_pred_train6)  # CatBoost模型的R2分数
+r2_7 = r2_score(y_train, y_pred_train7)  # RandomForest模型的R2分数
 
 # 显示各模型的R2分数
 print(f'\n各模型R2分数：')
@@ -618,14 +762,18 @@ print(f'模型2 (XGB深度7): {r2_2:.4f}')
 print(f'模型3 (XGB深度4): {r2_3:.4f}')
 print(f'模型4 (XGB早停): {r2_4:.4f}')
 print(f'模型5 (LightGBM): {r2_5:.4f}')
+print(f'模型6 (CatBoost): {r2_6:.4f}')
+print(f'模型7 (RandomForest): {r2_7:.4f}')
 
 # 计算加权平均权重（使用R2分数作为权重）
-total_r2 = r2_1 + r2_2 + r2_3 + r2_4 + r2_5
+total_r2 = r2_1 + r2_2 + r2_3 + r2_4 + r2_5 + r2_6 + r2_7
 weight1 = r2_1 / total_r2
 weight2 = r2_2 / total_r2
 weight3 = r2_3 / total_r2
 weight4 = r2_4 / total_r2
 weight5 = r2_5 / total_r2
+weight6 = r2_6 / total_r2  # CatBoost模型的权重
+weight7 = r2_7 / total_r2  # RandomForest模型的权重
 
 print(f'\n各模型权重：')
 print(f'模型1权重: {weight1:.4f}')
@@ -633,22 +781,199 @@ print(f'模型2权重: {weight2:.4f}')
 print(f'模型3权重: {weight3:.4f}')
 print(f'模型4权重: {weight4:.4f}')
 print(f'模型5权重: {weight5:.4f}')
+print(f'模型6权重: {weight6:.4f}')
+print(f'模型7权重: {weight7:.4f}')
 
 # 使用加权平均融合
 y_pred_ensemble = (y_pred_test1 * weight1 + 
                   y_pred_test2 * weight2 + 
                   y_pred_test3 * weight3 + 
                   y_pred_test4 * weight4 + 
-                  y_pred_test5 * weight5)
+                  y_pred_test5 * weight5 + 
+                  y_pred_test6 * weight6 +  # CatBoost模型的预测结果
+                  y_pred_test7 * weight7)  # RandomForest模型的预测结果
 
 # 评估融合模型在训练集上的效果
 y_pred_train_ensemble = (y_pred_train1 * weight1 + 
                         y_pred_train2 * weight2 + 
                         y_pred_train3 * weight3 + 
                         y_pred_train4 * weight4 + 
-                        y_pred_train5 * weight5)
+                        y_pred_train5 * weight5 + 
+                        y_pred_train6 * weight6 +  # CatBoost模型的预测结果
+                        y_pred_train7 * weight7)  # RandomForest模型的预测结果
 ensemble_train_r2 = r2_score(y_train, y_pred_train_ensemble)
-print(f'集成模型训练集R2分数: {ensemble_train_r2}')
+print(f'加权平均集成模型训练集R2分数: {ensemble_train_r2}')
+
+# =================================================
+# Stacking集成策略
+# =================================================
+print('\n=== 实现复杂集成策略 ===')
+
+# 1. 基础Stacking策略
+print('\n1. 基础Stacking策略')
+
+# 准备基础模型列表
+base_models = [
+    ('xgb_best', model1),
+    ('xgb_depth7', model2),
+    ('xgb_depth4', model3),
+    ('xgb_earlystop', model_with_early_stopping),
+    ('lgbm', model5),
+    ('catboost', model6),
+    ('rf', model7)
+]
+
+# 创建Stacking集成模型，使用线性回归作为元模型
+stacking_model = StackingRegressor(
+    estimators=base_models,
+    final_estimator=LinearRegression(),
+    cv=5,  # 使用5折交叉验证
+    passthrough=False  # 不将原始特征传递给元模型
+)
+
+# 训练Stacking模型
+print('训练基础Stacking集成模型...')
+stacking_model.fit(X_train, y_train)
+
+# 预测Stacking集成结果
+y_pred_train_stacking = stacking_model.predict(X_train)
+y_pred_test_stacking = stacking_model.predict(X_test)
+
+# 评估Stacking集成模型性能
+stacking_train_r2 = r2_score(y_train, y_pred_train_stacking)
+stacking_train_mae = mean_absolute_error(y_train, y_pred_train_stacking)
+stacking_train_rmse = np.sqrt(mean_squared_error(y_train, y_pred_train_stacking))
+print(f'基础Stacking集成模型训练集R2分数: {stacking_train_r2:.4f}')
+print(f'基础Stacking集成模型训练集MAE: {stacking_train_mae:.4f}')
+print(f'基础Stacking集成模型训练集RMSE: {stacking_train_rmse:.4f}')
+
+# 2. 多层Stacking策略
+print('\n2. 多层Stacking策略')
+
+# 第一层Stacking：使用不同类型的模型作为基础模型
+level0_models = [
+    ('xgb_best', model1),
+    ('xgb_depth7', model2),
+    ('xgb_depth4', model3),
+    ('xgb_earlystop', model_with_early_stopping),
+    ('lgbm', model5),
+    ('catboost', model6),
+    ('rf', model7)
+]
+
+# 第二层Stacking：使用XGBoost作为元模型，接收第一层的输出
+level1_models = [
+    ('stacking1', StackingRegressor(
+        estimators=level0_models,
+        final_estimator=LinearRegression(),
+        cv=5,
+        passthrough=False
+    )),
+    # 添加额外的元模型
+    ('xgb_meta', XGBRegressor(
+        objective='reg:squarederror',
+        n_estimators=200,
+        max_depth=5,
+        learning_rate=0.1,
+        subsample=0.8,
+        colsample_bytree=0.8,
+        random_state=50
+    )),
+    ('lgbm_meta', LGBMRegressor(
+        objective='regression',
+        n_estimators=200,
+        max_depth=5,
+        learning_rate=0.1,
+        subsample=0.8,
+        colsample_bytree=0.8,
+        random_state=51
+    ))
+]
+
+# 最终层Stacking：将第二层的输出进行融合
+final_stacking_model = StackingRegressor(
+    estimators=level1_models,
+    final_estimator=LinearRegression(),
+    cv=5,
+    passthrough=False
+)
+
+# 训练多层Stacking模型
+print('训练多层Stacking集成模型...')
+final_stacking_model.fit(X_train, y_train)
+
+# 使用多层Stacking模型进行预测
+y_pred_train_multi_stacking = final_stacking_model.predict(X_train)
+y_pred_test_multi_stacking = final_stacking_model.predict(X_test)
+
+# 评估多层Stacking模型性能
+multi_stacking_train_r2 = r2_score(y_train, y_pred_train_multi_stacking)
+multi_stacking_train_mae = mean_absolute_error(y_train, y_pred_train_multi_stacking)
+multi_stacking_train_rmse = np.sqrt(mean_squared_error(y_train, y_pred_train_multi_stacking))
+print(f'多层Stacking集成模型训练集R2分数: {multi_stacking_train_r2:.4f}')
+print(f'多层Stacking集成模型训练集MAE: {multi_stacking_train_mae:.4f}')
+print(f'多层Stacking集成模型训练集RMSE: {multi_stacking_train_rmse:.4f}')
+
+# 3. 混合集成策略（Stacking + 加权平均）
+print('\n3. 混合集成策略（Stacking + 加权平均）')
+
+# 获取所有模型的预测结果
+y_preds_all = [
+    y_pred_train1, y_pred_train2, y_pred_train3, y_pred_train4,
+    y_pred_train5, y_pred_train6, y_pred_train7, y_pred_train_ensemble,
+    y_pred_train_stacking, y_pred_train_multi_stacking
+]
+
+# 计算每个模型的权重（基于R2分数）
+r2_scores_all = [r2_score(y_train, pred) for pred in y_preds_all]
+total_r2_all = sum(r2_scores_all)
+weights_all = [r2 / total_r2_all for r2 in r2_scores_all]
+
+# 计算混合集成的预测结果
+y_pred_train_hybrid = np.zeros_like(y_train, dtype=np.float64)
+for i, pred in enumerate(y_preds_all):
+    y_pred_train_hybrid += pred * weights_all[i]
+
+# 计算混合集成在测试集上的预测结果
+y_preds_all_test = [
+    y_pred_test1, y_pred_test2, y_pred_test3, y_pred_test4,
+    y_pred_test5, y_pred_test6, y_pred_test7, y_pred_ensemble,
+    y_pred_test_stacking, y_pred_test_multi_stacking
+]
+
+y_pred_test_hybrid = np.zeros_like(y_pred_test1, dtype=np.float64)
+for i, pred in enumerate(y_preds_all_test):
+    y_pred_test_hybrid += pred * weights_all[i]
+
+# 评估混合集成模型性能
+hybrid_train_r2 = r2_score(y_train, y_pred_train_hybrid)
+hybrid_train_mae = mean_absolute_error(y_train, y_pred_train_hybrid)
+hybrid_train_rmse = np.sqrt(mean_squared_error(y_train, y_pred_train_hybrid))
+print(f'混合集成模型训练集R2分数: {hybrid_train_r2:.4f}')
+print(f'混合集成模型训练集MAE: {hybrid_train_mae:.4f}')
+print(f'混合集成模型训练集RMSE: {hybrid_train_rmse:.4f}')
+
+# 4. 选择最佳集成模型
+print('\n4. 选择最佳集成模型')
+ensemble_models = [
+    ('加权平均集成模型', y_pred_train_ensemble, y_pred_ensemble),
+    ('基础Stacking集成模型', y_pred_train_stacking, y_pred_test_stacking),
+    ('多层Stacking集成模型', y_pred_train_multi_stacking, y_pred_test_multi_stacking),
+    ('混合集成模型', y_pred_train_hybrid, y_pred_test_hybrid)
+]
+
+best_model_name = ''
+best_r2 = -float('inf')
+best_y_pred_test = None
+
+for model_name, y_pred_train, y_pred_test in ensemble_models:
+    current_r2 = r2_score(y_train, y_pred_train)
+    if current_r2 > best_r2:
+        best_r2 = current_r2
+        best_model_name = model_name
+        best_y_pred_test = y_pred_test
+
+print(f'最佳集成模型: {best_model_name}, R2分数: {best_r2:.4f}')
 
 # Cell 18 (Markdown)
 # 5. 评估与分析优化
@@ -665,7 +990,7 @@ train_with_predictions['abs_residual'] = train_with_predictions['residual'].abs(
 # 分析残差与重要特征的关系
 print('分析残差与重要特征的关系...')
 
-# 保存残差分布图
+# 残差与功率的关系
 plt.figure(figsize=(12, 6))
 plt.scatter(train_with_predictions['power'], train_with_predictions['abs_residual'], alpha=0.5)
 plt.xlabel('功率')
@@ -674,6 +999,7 @@ plt.title('功率与预测残差的关系')
 plt.savefig('residual_vs_power.png')
 print('残差与功率的关系图已保存为 residual_vs_power.png')
 
+# 残差与里程的关系
 plt.figure(figsize=(12, 6))
 plt.scatter(train_with_predictions['km'], train_with_predictions['abs_residual'], alpha=0.5)
 plt.xlabel('里程')
@@ -682,6 +1008,7 @@ plt.title('里程与预测残差的关系')
 plt.savefig('residual_vs_km.png')
 print('残差与里程的关系图已保存为 residual_vs_km.png')
 
+# 残差与车龄的关系
 plt.figure(figsize=(12, 6))
 plt.scatter(train_with_predictions['car_age_days'], train_with_predictions['abs_residual'], alpha=0.5)
 plt.xlabel('车龄（天）')
@@ -697,9 +1024,6 @@ print(top_error_samples[['price', 'pred_price', 'residual', 'abs_residual', 'pow
 
 # Cell 20
 print('\n=== 5.2 多指标评估 ===')
-
-# 导入所需的评估指标
-from sklearn.metrics import mean_absolute_error
 
 # 计算多种评估指标
 r2 = ensemble_train_r2
@@ -717,14 +1041,17 @@ print(f"MAPE: {mape:.2f}%")
 # 对比各个模型的性能
 print('\n各模型性能对比：')
 
-# 计算单个模型的性能
+# 对比各模型性能
 models = [
     ('最佳参数模型', y_pred_train1),
     ('深度7模型', y_pred_train2),
     ('深度4模型', y_pred_train3),
     ('早停模型', y_pred_train4),
     ('LightGBM模型', y_pred_train5),
-    ('集成模型', y_pred_train_ensemble)
+    ('CatBoost模型', y_pred_train6),
+    ('RandomForest模型', y_pred_train7),
+    ('加权平均集成模型', y_pred_train_ensemble),
+    ('Stacking集成模型', y_pred_train_stacking)
 ]
 
 for model_name, y_pred in models:
@@ -733,10 +1060,10 @@ for model_name, y_pred in models:
     rmse = np.sqrt(mean_squared_error(y_train, y_pred))
     print(f"{model_name}: R2={r2:.4f}, MAE={mae:.4f}, RMSE={rmse:.4f}")
 
-# Cell 15
+# 生成最终提交文件
 out_df = pd.DataFrame()
 out_df['ID'] = test['ID']
-out_df['price'] = y_pred_ensemble
+out_df['price'] = y_pred_stacking  # 使用Stacking集成的结果提交
 
 # Cell 16 (Markdown)
 # 务必把StudentId写成自己的学号，否则没有成绩！
