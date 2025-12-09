@@ -22,6 +22,7 @@ from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler, LabelEncoder
 from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
 from sklearn.linear_model import LogisticRegression
+from sklearn.svm import SVC, LinearSVC
 from sklearn.metrics import classification_report, confusion_matrix, accuracy_score
 import datetime
 import warnings
@@ -240,6 +241,32 @@ best_model.fit(X_train_resampled, y_train_resampled)
 final_train_score = accuracy_score(y_train, best_model.predict(X_train_selected))
 print(f"CatBoost模型在训练集上的准确率: {final_train_score:.4f}")
 
+# 训练单独的SVM模型 - 使用LinearSVC配合CalibratedClassifierCV实现概率输出
+print("\n使用SVM模型进行训练...")
+from sklearn.calibration import CalibratedClassifierCV
+
+# 创建LinearSVC模型
+linear_svc = LinearSVC(
+    random_state=42, 
+    C=0.5, 
+    class_weight='balanced',
+    dual=False,  # 对于样本数大于特征数的情况，使用dual=False更高效
+    verbose=0
+)
+
+# 使用CalibratedClassifierCV获取概率输出
+svm_model = CalibratedClassifierCV(
+    estimator=linear_svc, 
+    cv=3, 
+    method='sigmoid'  # 使用sigmoid校准获取概率
+)
+
+svm_model.fit(X_train_resampled, y_train_resampled)
+
+# 评估SVM模型
+svm_train_score = accuracy_score(y_train, svm_model.predict(X_train_selected))
+print(f"SVM模型在训练集上的准确率: {svm_train_score:.4f}")
+
 # 优化2：使用更高级的Stacking Ensemble
 print("\n尝试使用高级Stacking Ensemble...")
 from sklearn.ensemble import StackingClassifier
@@ -266,6 +293,17 @@ base_estimators = [
         subsample=0.85,
         max_features='sqrt',
         verbose=0
+    )),
+    ('svm', CalibratedClassifierCV(
+        estimator=LinearSVC(
+            random_state=42, 
+            C=0.5, 
+            class_weight='balanced',
+            dual=False,  # 对于样本数大于特征数的情况，使用dual=False更高效
+            verbose=0
+        ), 
+        cv=3, 
+        method='sigmoid'  # 使用sigmoid校准获取概率
     )),
     ('catboost', best_model)  # 使用已经训练好的CatBoost模型
 ]
@@ -303,6 +341,7 @@ from sklearn.ensemble import VotingClassifier
 voting_model = VotingClassifier(
     estimators=[
         ('catboost', best_model),
+        ('svm', svm_model),
         ('stacking', stacking_model)
     ],
     voting='soft',
@@ -318,6 +357,7 @@ print(f"Voting Ensemble在训练集上的准确率: {voting_train_score:.4f}")
 # 选择表现最好的模型
 scores = {
     'CatBoost': final_train_score,
+    'SVM': svm_train_score,
     'Stacking': stacking_train_score,
     'Voting': voting_train_score
 }
@@ -325,6 +365,8 @@ scores = {
 best_ensemble_name = max(scores, key=scores.get)
 if best_ensemble_name == 'CatBoost':
     final_model = best_model
+elif best_ensemble_name == 'SVM':
+    final_model = svm_model
 elif best_ensemble_name == 'Stacking':
     final_model = stacking_model
 else:
