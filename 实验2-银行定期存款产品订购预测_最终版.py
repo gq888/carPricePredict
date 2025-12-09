@@ -18,9 +18,9 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import train_test_split, StratifiedKFold, cross_val_score
 from sklearn.preprocessing import StandardScaler, LabelEncoder
-from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
+from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier, StackingClassifier, VotingClassifier
 from sklearn.linear_model import LogisticRegression
 from sklearn.svm import SVC, LinearSVC
 from sklearn.metrics import classification_report, confusion_matrix, accuracy_score
@@ -210,7 +210,6 @@ print(f"步骤1 - 去除低方差特征: {X_train.shape[1]} → {X_train_var_df.
 
 # 步骤2：使用RFE（递归特征消除）进一步选择特征
 print("步骤2 - 使用RFE进行递归特征消除...")
-from sklearn.ensemble import RandomForestClassifier
 
 # 使用RandomForest作为基础评估器
 estimator = RandomForestClassifier(n_estimators=100, random_state=42, class_weight='balanced')
@@ -240,54 +239,46 @@ X_train_resampled, y_train_resampled = adasyn.fit_resample(X_train_selected, y_t
 print(f"原始数据分布: {dict(pd.Series(y_train).value_counts())}")
 print(f"过采样后数据分布: {dict(pd.Series(y_train_resampled).value_counts())}")
 
-# 优化1：使用高效的CatBoost配置（平衡性能和速度）
-print("\n使用高效的CatBoost模型进行训练...")
-best_model = CatBoostClassifier(
-    random_state=42, 
-    iterations=400,  # 适当减少迭代次数
-    learning_rate=0.05,  # 适当提高学习率
-    depth=8,  # 适当减少树深度
-    auto_class_weights='Balanced',
-    subsample=0.85,  # 保持合理的子采样
-    colsample_bylevel=0.85,  # 保持合理的列采样
-    l2_leaf_reg=3,  # 调整正则化
-    bootstrap_type='Bernoulli',
-    grow_policy='SymmetricTree',  # 改回SymmetricTree，更高效
-    verbose=0
-)
+# 设置交叉验证参数 - 5折 StratifiedKFold
+print("\n设置5折StratifiedKFold交叉验证...")
+cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
 
-# 训练模型
-best_model.fit(X_train_resampled, y_train_resampled)
+# 定义模型列表
+def get_models():
+    """获取所有模型配置"""
+    # CatBoost模型
+    catboost_model = CatBoostClassifier(
+        random_state=42, 
+        iterations=400,  # 适当减少迭代次数
+        learning_rate=0.05,  # 适当提高学习率
+        depth=8,  # 适当减少树深度
+        auto_class_weights='Balanced',
+        subsample=0.85,  # 保持合理的子采样
+        colsample_bylevel=0.85,  # 保持合理的列采样
+        l2_leaf_reg=3,  # 调整正则化
+        bootstrap_type='Bernoulli',
+        grow_policy='SymmetricTree',  # 改回SymmetricTree，更高效
+        verbose=0
+    )
+    
+    # SVM模型
+    svm_model = SVC(
+        random_state=42, 
+        C=1.0, 
+        kernel='rbf',
+        gamma='scale',
+        class_weight='balanced',
+        probability=True,
+        verbose=0,
+        cache_size=500  # 增加缓存大小，提高训练速度
+    )
+    
+    return catboost_model, svm_model
 
-# 评估模型
-final_train_score = accuracy_score(y_train, best_model.predict(X_train_selected))
-print(f"CatBoost模型在训练集上的准确率: {final_train_score:.4f}")
+# 获取基础模型
+catboost_model, svm_model = get_models()
 
-# 训练单独的SVM模型 - 使用rbf核
-print("\n使用SVM模型进行训练...")
-svm_model = SVC(
-    random_state=42, 
-    C=1.0, 
-    kernel='rbf',
-    gamma='scale',
-    class_weight='balanced',
-    probability=True,
-    verbose=0,
-    cache_size=500  # 增加缓存大小，提高训练速度
-)
-
-svm_model.fit(X_train_resampled, y_train_resampled)
-
-# 评估SVM模型
-svm_train_score = accuracy_score(y_train, svm_model.predict(X_train_selected))
-print(f"SVM模型在训练集上的准确率: {svm_train_score:.4f}")
-
-# 优化2：使用更高级的Stacking Ensemble
-print("\n尝试使用高级Stacking Ensemble...")
-from sklearn.ensemble import StackingClassifier
-from sklearn.linear_model import LogisticRegression as StackingMetaModel
-
-# 准备高效的基础模型组合（平衡性能和训练速度）
+# 准备Stacking模型的基础模型（需要重新定义，因为Stacking会重新训练基础模型）
 base_estimators = [
     ('rf', RandomForestClassifier(
         random_state=42, 
@@ -322,7 +313,19 @@ base_estimators = [
         class_weight='balanced',
         verbose=-1
     )),
-    ('catboost', best_model)  # 使用已经训练好的CatBoost模型
+    ('catboost', CatBoostClassifier(
+        random_state=42, 
+        iterations=400,
+        learning_rate=0.05,
+        depth=8,
+        auto_class_weights='Balanced',
+        subsample=0.85,
+        colsample_bylevel=0.85,
+        l2_leaf_reg=3,
+        bootstrap_type='Bernoulli',
+        grow_policy='SymmetricTree',
+        verbose=0
+    ))
 ]
 
 # 使用高效的元分类器
@@ -345,52 +348,95 @@ stacking_model = StackingClassifier(
     passthrough=True  # 传递原始特征给元分类器
 )
 
-# 训练Stacking模型
-stacking_model.fit(X_train_resampled, y_train_resampled)
-
-# 评估Stacking模型
-stacking_train_score = accuracy_score(y_train, stacking_model.predict(X_train_selected))
-print(f"Stacking Ensemble在训练集上的准确率: {stacking_train_score:.4f}")
-
-# 优化3：使用Voting Ensemble作为备选
-print("\n尝试使用Voting Ensemble...")
-from sklearn.ensemble import VotingClassifier
-
+# 创建Voting模型（使用未训练的模型，会在交叉验证中重新训练）
 voting_model = VotingClassifier(
     estimators=[
-        ('catboost', best_model),
-        ('svm', svm_model),
-        ('stacking', stacking_model)
+        ('catboost', CatBoostClassifier(
+            random_state=42, 
+            iterations=400,
+            learning_rate=0.05,
+            depth=8,
+            auto_class_weights='Balanced',
+            subsample=0.85,
+            colsample_bylevel=0.85,
+            l2_leaf_reg=3,
+            bootstrap_type='Bernoulli',
+            grow_policy='SymmetricTree',
+            verbose=0
+        )),
+        ('svm', SVC(
+            random_state=42, 
+            C=1.0, 
+            kernel='rbf',
+            gamma='scale',
+            class_weight='balanced',
+            probability=True,
+            verbose=0,
+            cache_size=500
+        )),
+        ('rf', RandomForestClassifier(
+            random_state=42, 
+            n_estimators=300,
+            max_depth=10,
+            min_samples_split=3,
+            min_samples_leaf=2,
+            class_weight='balanced',
+            bootstrap=True,
+            max_features='sqrt'
+        ))
     ],
     voting='soft',
     n_jobs=-1
 )
 
-voting_model.fit(X_train_resampled, y_train_resampled)
-
-# 评估Voting模型
-voting_train_score = accuracy_score(y_train, voting_model.predict(X_train_selected))
-print(f"Voting Ensemble在训练集上的准确率: {voting_train_score:.4f}")
-
-# 选择表现最好的模型
-scores = {
-    'CatBoost': final_train_score,
-    'SVM': svm_train_score,
-    'Stacking': stacking_train_score,
-    'Voting': voting_train_score
+# 定义模型字典，用于交叉验证评估
+models = {
+    'CatBoost': catboost_model,
+    'SVM': svm_model,
+    'Stacking': stacking_model,
+    'Voting': voting_model
 }
 
-best_ensemble_name = max(scores, key=scores.get)
-if best_ensemble_name == 'CatBoost':
-    final_model = best_model
-elif best_ensemble_name == 'SVM':
-    final_model = svm_model
-elif best_ensemble_name == 'Stacking':
-    final_model = stacking_model
-else:
-    final_model = voting_model
+# 交叉验证评估函数
+def evaluate_models(models, cv):
+    """使用交叉验证评估所有模型"""
+    cv_results = {}
+    
+    for name, model in models.items():
+        print(f"\n正在进行{name}模型的5折交叉验证...")
+        
+        # 交叉验证 - 使用原始数据（未重采样）进行评估，确保结果可靠
+        cv_scores = cross_val_score(
+            model, 
+            X_train_selected, 
+            y_train, 
+            cv=cv, 
+            scoring='accuracy', 
+            n_jobs=-1
+        )
+        
+        # 显示交叉验证结果
+        print(f"{name} 交叉验证准确率: {cv_scores.mean():.4f} ± {cv_scores.std():.4f}")
+        cv_results[name] = cv_scores.mean()
+    
+    return cv_results
 
-print(f"\n选择{best_ensemble_name} Ensemble作为最终模型")
+# 执行交叉验证评估
+print("\n开始模型交叉验证评估...")
+cv_results = evaluate_models(models, cv)
+
+# 选择表现最好的模型
+best_ensemble_name = max(cv_results, key=cv_results.get)
+best_ensemble_score = cv_results[best_ensemble_name]
+print(f"\n交叉验证结果最佳模型: {best_ensemble_name}")
+print(f"最佳交叉验证准确率: {best_ensemble_score:.4f}")
+
+# 训练最终模型（使用全部数据，用于最终预测）
+print(f"\n使用全部训练数据训练{best_ensemble_name}模型...")
+final_model = models[best_ensemble_name]
+final_model.fit(X_train_resampled, y_train_resampled)
+
+print("\n模型训练完成！")
 
 # 预测
 y_pred = final_model.predict(X_test_selected)
