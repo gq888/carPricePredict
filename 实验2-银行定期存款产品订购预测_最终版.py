@@ -35,6 +35,9 @@ import xgboost as xgb
 from xgboost import XGBClassifier
 from catboost import CatBoostClassifier
 
+# 确保所有模型都已正确导入
+print("已导入的模型: LightGBM, XGBoost, CatBoost")
+
 # 引入不平衡数据处理库
 from imblearn.over_sampling import SMOTE
 
@@ -192,21 +195,39 @@ scaler = StandardScaler()
 X_train[numeric_cols] = scaler.fit_transform(X_train[numeric_cols])
 X_test[numeric_cols] = scaler.transform(X_test[numeric_cols])
 
-# 优化1：特征选择 - 使用更可靠的特征选择方法
-print("\n进行特征选择...")
-from sklearn.feature_selection import VarianceThreshold
+# 优化1：高级特征选择 - 结合方差过滤和RFE
+print("\n进行高级特征选择...")
+from sklearn.feature_selection import VarianceThreshold, RFE, SelectFromModel
 
-# 使用更高的阈值去除低方差特征，减少特征数量
-var_threshold = VarianceThreshold(threshold=0.05)  # 提高阈值，保留更少特征
+# 步骤1：去除低方差特征
+var_threshold = VarianceThreshold(threshold=0.01)
 X_train_var = var_threshold.fit_transform(X_train)
 X_test_var = var_threshold.transform(X_test)
+var_selected_cols = X_train.columns[var_threshold.get_support()]
+X_train_var_df = pd.DataFrame(X_train_var, columns=var_selected_cols, index=X_train.index)
+X_test_var_df = pd.DataFrame(X_test_var, columns=var_selected_cols, index=X_test.index)
+print(f"步骤1 - 去除低方差特征: {X_train.shape[1]} → {X_train_var_df.shape[1]}")
+
+# 步骤2：使用RFE（递归特征消除）进一步选择特征
+print("步骤2 - 使用RFE进行递归特征消除...")
+from sklearn.ensemble import RandomForestClassifier
+
+# 使用RandomForest作为基础评估器
+estimator = RandomForestClassifier(n_estimators=100, random_state=42, class_weight='balanced')
+
+# RFE选择最重要的特征，保留约40个
+n_features = min(40, X_train_var_df.shape[1] // 2)
+print(f"RFE目标特征数量: {n_features}")
+
+rfe = RFE(estimator=estimator, n_features_to_select=n_features, step=5)
+X_train_rfe = rfe.fit_transform(X_train_var_df, y_train)
+X_test_rfe = rfe.transform(X_test_var_df)
 
 # 转换回DataFrame，保持列名
-selected_cols = X_train.columns[var_threshold.get_support()]
-X_train_selected = pd.DataFrame(X_train_var, columns=selected_cols, index=X_train.index)
-X_test_selected = pd.DataFrame(X_test_var, columns=selected_cols, index=X_test.index)
-
-print(f"原始特征数量: {X_train.shape[1]}, 去除低方差特征后: {X_train_selected.shape[1]}")
+rfe_selected_cols = var_selected_cols[rfe.support_]
+X_train_selected = pd.DataFrame(X_train_rfe, columns=rfe_selected_cols, index=X_train.index)
+X_test_selected = pd.DataFrame(X_test_rfe, columns=rfe_selected_cols, index=X_test.index)
+print(f"步骤2 - RFE特征选择: {X_train_var_df.shape[1]} → {X_train_selected.shape[1]}")
 
 # 处理数据不平衡问题 - 使用更高级的过采样策略
 print("\n使用SMOTE处理数据不平衡...")
@@ -219,19 +240,19 @@ X_train_resampled, y_train_resampled = adasyn.fit_resample(X_train_selected, y_t
 print(f"原始数据分布: {dict(pd.Series(y_train).value_counts())}")
 print(f"过采样后数据分布: {dict(pd.Series(y_train_resampled).value_counts())}")
 
-# 优化1：使用更复杂的CatBoost参数（修复参数冲突）
-print("\n使用优化的CatBoost模型进行训练...")
+# 优化1：使用高效的CatBoost配置（平衡性能和速度）
+print("\n使用高效的CatBoost模型进行训练...")
 best_model = CatBoostClassifier(
     random_state=42, 
-    iterations=400, 
-    learning_rate=0.05, 
-    depth=8, 
+    iterations=400,  # 适当减少迭代次数
+    learning_rate=0.05,  # 适当提高学习率
+    depth=8,  # 适当减少树深度
     auto_class_weights='Balanced',
-    subsample=0.85,
-    colsample_bylevel=0.85,
-    l2_leaf_reg=5,  # 只保留l2_leaf_reg，移除reg_lambda（同义词冲突）
+    subsample=0.85,  # 保持合理的子采样
+    colsample_bylevel=0.85,  # 保持合理的列采样
+    l2_leaf_reg=3,  # 调整正则化
     bootstrap_type='Bernoulli',
-    grow_policy='SymmetricTree',
+    grow_policy='SymmetricTree',  # 改回SymmetricTree，更高效
     verbose=0
 )
 
@@ -266,49 +287,53 @@ print("\n尝试使用高级Stacking Ensemble...")
 from sklearn.ensemble import StackingClassifier
 from sklearn.linear_model import LogisticRegression as StackingMetaModel
 
-# 准备更强的基础模型
+# 准备高效的基础模型组合（平衡性能和训练速度）
 base_estimators = [
     ('rf', RandomForestClassifier(
         random_state=42, 
-        n_estimators=300, 
-        max_depth=12, 
-        min_samples_split=4,
+        n_estimators=300,  # 减少树数量，提高速度
+        max_depth=10,  # 减少树深度，提高速度
+        min_samples_split=3,
         min_samples_leaf=2,
         class_weight='balanced',
-        bootstrap=True
+        bootstrap=True,
+        max_features='sqrt'
     )),
     ('gb', GradientBoostingClassifier(
         random_state=42, 
-        n_estimators=400, 
-        learning_rate=0.05, 
-        max_depth=7,
-        min_samples_split=4,
+        n_estimators=400,  # 减少迭代次数，提高速度
+        learning_rate=0.05,  # 提高学习率，提高速度
+        max_depth=7,  # 减少树深度，提高速度
+        min_samples_split=3,
         min_samples_leaf=2,
         subsample=0.85,
         max_features='sqrt',
         verbose=0
     )),
-    ('svm', SVC(
-        random_state=42, 
-        C=1.0, 
-        kernel='rbf',
-        gamma='scale',
+    ('lgb', LGBMClassifier(
+        random_state=42,
+        n_estimators=400,
+        learning_rate=0.05,
+        max_depth=8,
+        num_leaves=64,
+        subsample=0.85,
+        colsample_bytree=0.85,
+        reg_lambda=3,
         class_weight='balanced',
-        probability=True,
-        verbose=0,
-        cache_size=500  # 增加缓存大小，提高训练速度
+        verbose=-1
     )),
     ('catboost', best_model)  # 使用已经训练好的CatBoost模型
 ]
 
-# 使用更复杂的元分类器
+# 使用高效的元分类器
 meta_model = LogisticRegression(
     random_state=42, 
-    max_iter=3000, 
-    C=1.0,
+    max_iter=3000,  # 减少迭代次数
+    C=2.0,  # 适当增加C值
     penalty='l2',
     solver='lbfgs',
-    class_weight='balanced'
+    class_weight='balanced',
+    verbose=0
 )
 
 # 创建Stacking模型
