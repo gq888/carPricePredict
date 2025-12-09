@@ -192,20 +192,21 @@ scaler = StandardScaler()
 X_train[numeric_cols] = scaler.fit_transform(X_train[numeric_cols])
 X_test[numeric_cols] = scaler.transform(X_test[numeric_cols])
 
-# 优化1：特征选择 - 使用VarianceThreshold去除低方差特征
+# 优化1：特征选择 - 使用更可靠的特征选择方法
 print("\n进行特征选择...")
-from sklearn.feature_selection import VarianceThreshold, SelectFromModel
+from sklearn.feature_selection import VarianceThreshold
 
-# 去除低方差特征
-var_threshold = VarianceThreshold(threshold=0.01)
+# 使用更高的阈值去除低方差特征，减少特征数量
+var_threshold = VarianceThreshold(threshold=0.05)  # 提高阈值，保留更少特征
 X_train_var = var_threshold.fit_transform(X_train)
 X_test_var = var_threshold.transform(X_test)
-print(f"原始特征数量: {X_train.shape[1]}, 去除低方差特征后: {X_train_var.shape[1]}")
 
 # 转换回DataFrame，保持列名
 selected_cols = X_train.columns[var_threshold.get_support()]
 X_train_selected = pd.DataFrame(X_train_var, columns=selected_cols, index=X_train.index)
 X_test_selected = pd.DataFrame(X_test_var, columns=selected_cols, index=X_test.index)
+
+print(f"原始特征数量: {X_train.shape[1]}, 去除低方差特征后: {X_train_selected.shape[1]}")
 
 # 处理数据不平衡问题 - 使用更高级的过采样策略
 print("\n使用SMOTE处理数据不平衡...")
@@ -241,24 +242,17 @@ best_model.fit(X_train_resampled, y_train_resampled)
 final_train_score = accuracy_score(y_train, best_model.predict(X_train_selected))
 print(f"CatBoost模型在训练集上的准确率: {final_train_score:.4f}")
 
-# 训练单独的SVM模型 - 使用LinearSVC配合CalibratedClassifierCV实现概率输出
+# 训练单独的SVM模型 - 使用rbf核
 print("\n使用SVM模型进行训练...")
-from sklearn.calibration import CalibratedClassifierCV
-
-# 创建LinearSVC模型
-linear_svc = LinearSVC(
+svm_model = SVC(
     random_state=42, 
-    C=0.5, 
+    C=1.0, 
+    kernel='rbf',
+    gamma='scale',
     class_weight='balanced',
-    dual=False,  # 对于样本数大于特征数的情况，使用dual=False更高效
-    verbose=0
-)
-
-# 使用CalibratedClassifierCV获取概率输出
-svm_model = CalibratedClassifierCV(
-    estimator=linear_svc, 
-    cv=3, 
-    method='sigmoid'  # 使用sigmoid校准获取概率
+    probability=True,
+    verbose=0,
+    cache_size=500  # 增加缓存大小，提高训练速度
 )
 
 svm_model.fit(X_train_resampled, y_train_resampled)
@@ -294,16 +288,15 @@ base_estimators = [
         max_features='sqrt',
         verbose=0
     )),
-    ('svm', CalibratedClassifierCV(
-        estimator=LinearSVC(
-            random_state=42, 
-            C=0.5, 
-            class_weight='balanced',
-            dual=False,  # 对于样本数大于特征数的情况，使用dual=False更高效
-            verbose=0
-        ), 
-        cv=3, 
-        method='sigmoid'  # 使用sigmoid校准获取概率
+    ('svm', SVC(
+        random_state=42, 
+        C=1.0, 
+        kernel='rbf',
+        gamma='scale',
+        class_weight='balanced',
+        probability=True,
+        verbose=0,
+        cache_size=500  # 增加缓存大小，提高训练速度
     )),
     ('catboost', best_model)  # 使用已经训练好的CatBoost模型
 ]
