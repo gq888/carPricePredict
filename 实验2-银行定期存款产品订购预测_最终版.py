@@ -132,14 +132,18 @@ X_train_resampled, y_train_resampled = smote.fit_resample(X_train, y_train)
 print(f"原始数据分布: {dict(pd.Series(y_train).value_counts())}")
 print(f"过采样后数据分布: {dict(pd.Series(y_train_resampled).value_counts())}")
 
-# 使用CatBoost模型（已通过交叉验证确认准确率92.85%）
-print("\n使用CatBoost模型进行训练...")
+# 优化1：使用更复杂的CatBoost参数
+print("\n使用优化的CatBoost模型进行训练...")
 best_model = CatBoostClassifier(
     random_state=42, 
-    iterations=200, 
-    learning_rate=0.1, 
-    depth=6, 
+    iterations=300, 
+    learning_rate=0.08, 
+    depth=7, 
     auto_class_weights='Balanced',
+    subsample=0.8,
+    colsample_bylevel=0.8,
+    reg_lambda=3,
+    bootstrap_type='Bernoulli',
     verbose=0
 )
 
@@ -148,10 +152,45 @@ best_model.fit(X_train_resampled, y_train_resampled)
 
 # 评估模型
 final_train_score = accuracy_score(y_train, best_model.predict(X_train))
-print(f"最终模型在训练集上的准确率: {final_train_score:.4f}")
+print(f"CatBoost模型在训练集上的准确率: {final_train_score:.4f}")
+
+# 优化2：使用Stacking Ensemble进一步提升性能
+print("\n尝试使用Stacking Ensemble...")
+from sklearn.ensemble import StackingClassifier
+from sklearn.linear_model import LogisticRegression as StackingMetaModel
+
+# 准备基础模型
+base_estimators = [
+    ('rf', RandomForestClassifier(random_state=42, n_estimators=200, max_depth=10, class_weight='balanced')),
+    ('gb', GradientBoostingClassifier(random_state=42, n_estimators=300, learning_rate=0.08, max_depth=6, subsample=0.8)),
+    ('catboost', best_model)  # 使用已经训练好的CatBoost模型
+]
+
+# 创建Stacking模型
+stacking_model = StackingClassifier(
+    estimators=base_estimators,
+    final_estimator=StackingMetaModel(random_state=42, max_iter=2000),
+    cv=5,
+    n_jobs=-1
+)
+
+# 训练Stacking模型
+stacking_model.fit(X_train_resampled, y_train_resampled)
+
+# 评估Stacking模型
+stacking_train_score = accuracy_score(y_train, stacking_model.predict(X_train))
+print(f"Stacking Ensemble在训练集上的准确率: {stacking_train_score:.4f}")
+
+# 选择表现更好的模型
+if stacking_train_score > final_train_score:
+    final_model = stacking_model
+    print("\n选择Stacking Ensemble作为最终模型")
+else:
+    final_model = best_model
+    print("\n选择CatBoost作为最终模型")
 
 # 预测
-y_pred = best_model.predict(X_test)
+y_pred = final_model.predict(X_test)
 
 print("\n模型训练完成！")
 
