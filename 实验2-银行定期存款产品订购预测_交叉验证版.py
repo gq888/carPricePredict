@@ -31,6 +31,9 @@ from imblearn.over_sampling import ADASYN
 # 引入特征选择
 from sklearn.feature_selection import VarianceThreshold, RFE
 
+# 引入贝叶斯优化
+from bayes_opt import BayesianOptimization
+
 # 确保所有模型都已正确导入
 print("已导入的模型: LightGBM, XGBoost, CatBoost, RandomForest, GradientBoosting, SVM")
 
@@ -321,6 +324,94 @@ models = {
     )
 }
 
+# 定义XGBoost贝叶斯优化目标函数
+def xgb_cv(n_estimators, learning_rate, max_depth, min_child_weight, subsample, colsample_bytree, reg_alpha, reg_lambda):
+    """XGBoost交叉验证目标函数"""
+    model = XGBClassifier(
+        random_state=42,
+        n_estimators=int(n_estimators),
+        learning_rate=learning_rate,
+        max_depth=int(max_depth),
+        min_child_weight=min_child_weight,
+        subsample=subsample,
+        colsample_bytree=colsample_bytree,
+        reg_alpha=reg_alpha,
+        reg_lambda=reg_lambda,
+        gamma=0.1,
+        objective='binary:logistic',
+        eval_metric='logloss',
+        use_label_encoder=False,
+        verbosity=0
+    )
+    
+    cv_scores = cross_val_score(
+        model, 
+        X_train_selected_df, 
+        y_train, 
+        cv=cv, 
+        scoring='accuracy', 
+        n_jobs=-1
+    )
+    
+    return cv_scores.mean()
+
+# 贝叶斯优化XGBoost参数
+print("\n" + "="*60)
+print("开始使用贝叶斯优化XGBoost参数...")
+
+# 定义参数搜索空间
+pbounds = {
+    'n_estimators': (500, 2000),
+    'learning_rate': (0.005, 0.03),
+    'max_depth': (3, 10),
+    'min_child_weight': (1, 10),
+    'subsample': (0.6, 0.95),
+    'colsample_bytree': (0.6, 0.95),
+    'reg_alpha': (0, 5),
+    'reg_lambda': (1, 20)
+}
+
+# 初始化贝叶斯优化器
+optimizer = BayesianOptimization(
+    f=xgb_cv,
+    pbounds=pbounds,
+    random_state=42,
+    verbose=2
+)
+
+# 执行优化
+optimizer.maximize(
+    init_points=10,  # 初始随机点数量
+    n_iter=20       # 迭代次数
+)
+
+# 获取最佳参数
+best_params = optimizer.max['params']
+print("\n贝叶斯优化最佳参数:")
+for key, value in best_params.items():
+    if key in ['n_estimators', 'max_depth']:
+        print(f"{key}: {int(value)}")
+    else:
+        print(f"{key}: {value:.4f}")
+
+# 更新模型列表中的XGBoost模型，使用优化后的参数
+models['XGBoost'] = XGBClassifier(
+    random_state=42,
+    n_estimators=int(best_params['n_estimators']),
+    learning_rate=best_params['learning_rate'],
+    max_depth=int(best_params['max_depth']),
+    min_child_weight=best_params['min_child_weight'],
+    subsample=best_params['subsample'],
+    colsample_bytree=best_params['colsample_bytree'],
+    reg_alpha=best_params['reg_alpha'],
+    reg_lambda=best_params['reg_lambda'],
+    gamma=0.1,
+    objective='binary:logistic',
+    eval_metric='logloss',
+    use_label_encoder=False,
+    verbosity=0
+)
+
 # 训练和交叉验证所有模型
 model_results = {}
 print("\n" + "="*60)
@@ -353,64 +444,6 @@ for name, model in models.items():
     print(f"各折结果: {[round(score, 4) for score in cv_scores]}")
 
 print("\n" + "="*60)
-
-# 训练集成模型 - 只使用表现最好的两个模型，避免XGBoost的兼容性问题
-print("\n训练并交叉验证集成模型...")
-
-# 只使用两个表现最好的模型（GradientBoosting和RandomForest）
-base_estimators = [
-    ('gb', GradientBoostingClassifier(
-        random_state=42,
-        n_estimators=1500,
-        learning_rate=0.02,
-        max_depth=7,
-        min_samples_split=5,
-        min_samples_leaf=3,
-        subsample=0.85,
-        max_features='sqrt',
-        verbose=0
-    )),
-    ('rf', RandomForestClassifier(
-        random_state=42,
-        n_estimators=500,
-        max_depth=15,
-        min_samples_split=4,
-        min_samples_leaf=2,
-        class_weight='balanced',
-        bootstrap=True,
-        max_features='sqrt',
-        oob_score=True,
-        verbose=0
-    ))
-]
-
-# 使用Voting Ensemble，训练时间较短，效果较好
-voting_model = VotingClassifier(
-    estimators=base_estimators,
-    voting='soft',
-    n_jobs=-1,
-    verbose=0
-)
-
-voting_model.fit(X_train_resampled, y_train_resampled)
-voting_cv_scores = cross_val_score(
-    voting_model, 
-    X_train_selected_df, 
-    y_train, 
-    cv=cv, 
-    scoring='accuracy', 
-    n_jobs=-1
-)
-
-model_results['Voting'] = {
-    'model': voting_model,
-    'cv_mean': voting_cv_scores.mean(),
-    'cv_std': voting_cv_scores.std(),
-    'cv_scores': voting_cv_scores
-}
-
-print(f"Voting Ensemble 交叉验证准确率: {voting_cv_scores.mean():.4f} ± {voting_cv_scores.std():.4f}")
-print(f"各折结果: {[round(score, 4) for score in voting_cv_scores]}")
 
 # 显示最佳模型
 print("\n" + "="*60)
