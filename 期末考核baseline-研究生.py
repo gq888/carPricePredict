@@ -320,11 +320,11 @@ def feature_engineering_stage():
         if '负债收入比' in train.columns:
             # 创建负债收入比分桶
             train['负债收入比等级'] = pd.cut(train['负债收入比'], 
-                                          bins=[0, 10, 20, 30, 100], 
-                                          labels=[0, 1, 2, 3])
+                                           bins=[0, 10, 20, 30, 100], 
+                                           labels=['低', '中低', '中高', '高'])
             test['负债收入比等级'] = pd.cut(test['负债收入比'], 
-                                         bins=[0, 10, 20, 30, 100], 
-                                         labels=[0, 1, 2, 3])
+                                          bins=[0, 10, 20, 30, 100], 
+                                          labels=['低', '中低', '中高', '高'])
         
         # 2.4 工作年限相关特征
         if '工作年限' in train.columns:
@@ -515,10 +515,13 @@ def submission_stage():
         test_predictions = global_data['test_predictions']
         test_clean = global_data['test_clean']
         
+        # 使用原始测试集的贷款ID字段
+        loan_ids = test_clean['贷款ID']
+        
         # 创建提交文件
         submission = pd.DataFrame({
-            'id': range(len(test_predictions)),
-            '是否违约': test_predictions,
+            'id': loan_ids,
+            '是否违约': test_predictions
         })
         
         # 保存提交文件
