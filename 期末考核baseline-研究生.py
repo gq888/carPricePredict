@@ -332,55 +332,59 @@ def feature_engineering_stage():
         
         print(f"特征工程 - 训练集: {train.shape}, 测试集: {test.shape}")
         
-        # 1. 标签编码
-        print("1. 标签编码...")
-        label_encoders = {}
-        categorical_cols = train.select_dtypes(include=['object']).columns
-        
-        for col in categorical_cols:
-            if col not in ['贷款ID']:  # 跳过ID列
-                le = LabelEncoder()
-                # 合并训练集和测试集的标签进行编码，避免测试集出现未知标签
-                combined_values = pd.concat([train[col], test[col]], axis=0).astype(str)
-                le.fit(combined_values)
-                
-                train[col] = le.transform(train[col].astype(str))
-                test[col] = le.transform(test[col].astype(str))
-                
-                label_encoders[col] = le
-        
-        # 2. 特征组合
-        print("2. 特征组合...")
-        # 创建一些派生特征
-        if '贷款总额' in train.columns and '月供' in train.columns:
-            train['贷款收入比'] = train['贷款总额'] / (train['月供'] * 12 + 1)  # 避免除零
-            test['贷款收入比'] = test['贷款总额'] / (test['月供'] * 12 + 1)
-        
-        if '信用卡数量' in train.columns and '信用卡总余额' in train.columns:
-            train['平均信用卡余额'] = train['信用卡总余额'] / (train['信用卡数量'] + 1)
-            test['平均信用卡余额'] = test['信用卡总余额'] / (test['信用卡数量'] + 1)
-        
-        # 3. 特征标准化
-        print("3. 特征标准化...")
-        scaler = StandardScaler()
-        numeric_cols = train.select_dtypes(include=[np.number]).columns
-        numeric_cols = [col for col in numeric_cols if col != '是否违约']  # 排除标签
-        
-        # 只在训练集上拟合scaler
-        scaler.fit(train[numeric_cols])
-        
-        # 转换训练集和测试集
-        train[numeric_cols] = scaler.transform(train[numeric_cols])
-        test[numeric_cols] = scaler.transform(test[numeric_cols])
-        
-        print(f"特征工程完成 - 训练集: {train.shape}, 测试集: {test.shape}")
-        
-        result = {
-            'train_fe': train,
-            'test_fe': test,
-            'scaler': scaler,
-            'label_encoders': label_encoders
-        }
+        # 尝试使用全面特征工程系统
+        try:
+            from 全面特征工程系统 import ComprehensiveFeatureEngineering
+            
+            print("使用全面特征工程系统...")
+            
+            # 分离训练集的特征和目标
+            if '是否违约' in train.columns:
+                X_train = train.drop(columns=['是否违约'])
+                y_train = train['是否违约']
+            else:
+                X_train = train
+                y_train = None
+            
+            X_test = test.copy()
+            
+            # 创建特征工程系统
+            fe_system = ComprehensiveFeatureEngineering(random_state=42)
+            
+            # 在训练集上拟合并转换
+            print("在训练集上应用特征工程...")
+            X_train_fe = fe_system.fit_transform(X_train, y_train)
+            
+            # 在测试集上转换
+            print("在测试集上应用特征工程...")
+            X_test_fe = fe_system.transform(X_test)
+            
+            # 保存转换器
+            fe_system.save_transformers('comprehensive_fe_transformers.pkl')
+            
+            print(f"训练集特征工程: {X_train.shape[1]} -> {X_train_fe.shape[1]} 个特征")
+            print(f"测试集特征工程: {X_test.shape[1]} -> {X_test_fe.shape[1]} 个特征")
+            
+            # 重建完整的数据集
+            if y_train is not None:
+                train_fe = pd.concat([X_train_fe, y_train], axis=1)
+            else:
+                train_fe = X_train_fe
+            
+            test_fe = X_test_fe
+            
+            result = {
+                'train_fe': train_fe,
+                'test_fe': test_fe,
+                'fe_system': fe_system
+            }
+            
+        except Exception as e:
+            print(f"全面特征工程系统出错: {e}")
+            print("回退到基础特征工程...")
+            
+            # 基础特征工程
+            result = basic_feature_engineering(train, test)
         
         # 保存缓存
         save_cache(cache_key, result, dependencies)
@@ -388,6 +392,60 @@ def feature_engineering_stage():
         return result
     
     return engineer_features
+
+def basic_feature_engineering(train, test):
+    """基础特征工程"""
+    print("使用基础特征工程...")
+    
+    # 1. 标签编码
+    print("1. 标签编码...")
+    label_encoders = {}
+    categorical_cols = train.select_dtypes(include=['object']).columns
+    
+    for col in categorical_cols:
+        if col not in ['贷款ID']:  # 跳过ID列
+            le = LabelEncoder()
+            # 合并训练集和测试集的标签进行编码，避免测试集出现未知标签
+            combined_values = pd.concat([train[col], test[col]], axis=0).astype(str)
+            le.fit(combined_values)
+            
+            train[col] = le.transform(train[col].astype(str))
+            test[col] = le.transform(test[col].astype(str))
+            
+            label_encoders[col] = le
+    
+    # 2. 特征组合
+    print("2. 特征组合...")
+    # 创建一些派生特征
+    if '贷款总额' in train.columns and '月供' in train.columns:
+        train['贷款收入比'] = train['贷款总额'] / (train['月供'] * 12 + 1)  # 避免除零
+        test['贷款收入比'] = test['贷款总额'] / (test['月供'] * 12 + 1)
+    
+    if '信用卡数量' in train.columns and '信用卡总余额' in train.columns:
+        train['平均信用卡余额'] = train['信用卡总余额'] / (train['信用卡数量'] + 1)
+        test['平均信用卡余额'] = test['信用卡总余额'] / (test['信用卡数量'] + 1)
+    
+    # 3. 特征标准化
+    print("3. 特征标准化...")
+    scaler = StandardScaler()
+    numeric_cols = train.select_dtypes(include=[np.number]).columns
+    numeric_cols = [col for col in numeric_cols if col != '是否违约']  # 排除标签
+    
+    # 只在训练集上拟合scaler
+    scaler.fit(train[numeric_cols])
+    
+    # 转换训练集和测试集
+    train[numeric_cols] = scaler.transform(train[numeric_cols])
+    test[numeric_cols] = scaler.transform(test[numeric_cols])
+    
+    print(f"基础特征工程完成 - 训练集: {train.shape}, 测试集: {test.shape}")
+    
+    return {
+        'train_fe': train,
+        'test_fe': test,
+        'scaler': scaler,
+        'label_encoders': label_encoders
+    }
 
 def modeling_stage():
     """建模阶段 - 闭包函数"""
@@ -417,7 +475,7 @@ def modeling_stage():
         
         # 1. 准备数据
         print("1. 数据准备...")
-        # 分离特征和标签
+        # 分离特征和目标
         X = train_fe.drop(columns=['是否违约', '贷款ID'])
         y = train_fe['是否违约']
         
@@ -479,62 +537,79 @@ def modeling_stage():
         print(f"Random Forest - Best AUC: {rf_grid.best_score_:.4f}")
         print(f"Best params: {rf_grid.best_params_}")
         
+        # 3. 模型集成 - 堆叠法 (Stacking)
+        print("2.3 模型集成 - Stacking...")
+        from sklearn.ensemble import StackingClassifier
+        from sklearn.linear_model import LogisticRegression
+        from sklearn.svm import SVC
+        from sklearn.ensemble import GradientBoostingClassifier
+        
+        # 定义基础模型
+        base_models = [
+            ('lr', LogisticRegression(C=1, penalty='l2', random_state=42)),
+            ('rf', RandomForestClassifier(n_estimators=100, max_depth=10, random_state=42)),
+            ('gb', GradientBoostingClassifier(n_estimators=100, learning_rate=0.1, random_state=42))
+        ]
+        
+        # 定义元模型
+        meta_model = LogisticRegression(random_state=42)
+        
+        # 创建堆叠分类器
+        stacking_model = StackingClassifier(
+            estimators=base_models,
+            final_estimator=meta_model,
+            cv=5,  # 使用5折交叉验证
+            stack_method='predict_proba'  # 使用概率预测
+        )
+        
+        # 训练堆叠模型
+        stacking_model.fit(X, y)
+        
+        # 评估堆叠模型
+        stacking_cv_score = cross_val_score(stacking_model, X, y, cv=3, scoring='roc_auc').mean()
+        
+        models['Stacking'] = stacking_model
+        cv_scores['Stacking'] = stacking_cv_score
+        
+        print(f"Stacking - AUC: {stacking_cv_score:.4f}")
+        
+        # 模型投票集成
+        print("2.4 模型投票集成...")
+        from sklearn.ensemble import VotingClassifier
+        
+        # 创建投票分类器
+        voting_model = VotingClassifier(
+            estimators=[
+                ('lr', lr_grid.best_estimator_),
+                ('rf', rf_grid.best_estimator_),
+                ('stacking', stacking_model)
+            ],
+            voting='soft'  # 使用软投票（基于概率）
+        )
+        
+        # 训练投票模型
+        voting_model.fit(X, y)
+        
+        # 评估投票模型
+        voting_cv_score = cross_val_score(voting_model, X, y, cv=3, scoring='roc_auc').mean()
+        
+        models['Voting'] = voting_model
+        cv_scores['Voting'] = voting_cv_score
+        
+        print(f"Voting - AUC: {voting_cv_score:.4f}")
+        
         # 3. 选择最佳模型
         print("3. 选择最佳模型...")
         best_model_name = max(cv_scores, key=cv_scores.get)
         best_model = models[best_model_name]
         
         print(f"最佳模型: {best_model_name} (AUC: {cv_scores[best_model_name]:.4f})")
+        print("\n所有模型性能:")
+        for model_name, score in sorted(cv_scores.items(), key=lambda x: x[1], reverse=True):
+            print(f"  {model_name}: {score:.4f}")
         
-        # 4. 特征重要性分析
-        print("4. 特征重要性分析...")
-        
-        # 为每个模型绘制特征重要性
-        for model_name, model in models.items():
-            if hasattr(model, 'feature_importances_'):
-                # 树模型特征重要性
-                feature_importance = pd.DataFrame({
-                    'feature': X.columns,
-                    'importance': model.feature_importances_
-                }).sort_values('importance', ascending=False)
-                
-                print(f"\n{model_name} 重要特征 (前10个):")
-                print(feature_importance.head(10))
-                
-                # 绘制特征重要性图
-                plt.figure(figsize=(10, 8))
-                top_features = feature_importance.head(15)
-                plt.barh(top_features['feature'], top_features['importance'])
-                plt.xlabel('特征重要性')
-                plt.title(f'{model_name} 特征重要性')
-                plt.tight_layout()
-                importance_path = f'/Users/qingguo/Documents/project/carPricePredict/feature_importance_{model_name}.png'
-                plt.savefig(importance_path, dpi=300, bbox_inches='tight')
-                plt.show()
-                
-            elif hasattr(model, 'coef_'):
-                # 线性模型特征重要性
-                feature_importance = pd.DataFrame({
-                    'feature': X.columns,
-                    'importance': np.abs(model.coef_[0])
-                }).sort_values('importance', ascending=False)
-                
-                print(f"\n{model_name} 重要特征 (前10个):")
-                print(feature_importance.head(10))
-                
-                # 绘制特征重要性图
-                plt.figure(figsize=(10, 8))
-                top_features = feature_importance.head(15)
-                plt.barh(top_features['feature'], top_features['importance'])
-                plt.xlabel('特征重要性')
-                plt.title(f'{model_name} 特征重要性')
-                plt.tight_layout()
-                importance_path = f'/Users/qingguo/Documents/project/carPricePredict/feature_importance_{model_name}.png'
-                plt.savefig(importance_path, dpi=300, bbox_inches='tight')
-                plt.show()
-        
-        # 5. 模型性能对比
-        print("5. 模型性能对比...")
+        # 4. 模型性能对比
+        print("\n4. 模型性能对比...")
         performance_df = pd.DataFrame({
             'Model': list(cv_scores.keys()),
             'CV_AUC': list(cv_scores.values())
@@ -544,29 +619,130 @@ def modeling_stage():
         print(performance_df)
         
         # 绘制模型性能对比图
-        plt.figure(figsize=(10, 6))
+        plt.figure(figsize=(12, 6))
+        plt.subplot(1, 2, 1)
         plt.bar(performance_df['Model'], performance_df['CV_AUC'])
         plt.xlabel('模型')
         plt.ylabel('交叉验证AUC')
         plt.title('模型性能对比')
         plt.xticks(rotation=45)
         plt.tight_layout()
+        
+        # 绘制模型性能对比图（水平条形图）
+        plt.subplot(1, 2, 2)
+        plt.barh(performance_df['Model'], performance_df['CV_AUC'])
+        plt.xlabel('交叉验证AUC')
+        plt.ylabel('模型')
+        plt.title('模型性能排名')
+        
+        plt.tight_layout()
         plt.savefig('/Users/qingguo/Documents/project/carPricePredict/model_performance_comparison.png', dpi=300, bbox_inches='tight')
         plt.show()
         
+        # 5. 特征重要性分析（仅对单一模型）
+        print("\n5. 特征重要性分析...")
+        
+        # 获取最佳模型的特征重要性
+        if hasattr(best_model, 'feature_importances_'):
+            # 树模型特征重要性
+            feature_importance = pd.DataFrame({
+                'feature': X.columns,
+                'importance': best_model.feature_importances_
+            }).sort_values('importance', ascending=False)
+            
+            print(f"\n{best_model_name} 重要特征 (前10个):")
+            print(feature_importance.head(10))
+            
+            # 绘制特征重要性图
+            plt.figure(figsize=(10, 8))
+            top_features = feature_importance.head(15)
+            plt.barh(top_features['feature'], top_features['importance'])
+            plt.xlabel('特征重要性')
+            plt.title(f'{best_model_name} 特征重要性')
+            plt.tight_layout()
+            importance_path = f'/Users/qingguo/Documents/project/carPricePredict/feature_importance_{best_model_name}.png'
+            plt.savefig(importance_path, dpi=300, bbox_inches='tight')
+            plt.show()
+            
+        elif hasattr(best_model, 'coef_'):
+            # 线性模型特征重要性
+            feature_importance = pd.DataFrame({
+                'feature': X.columns,
+                'importance': np.abs(best_model.coef_[0])
+            }).sort_values('importance', ascending=False)
+            
+            print(f"\n{best_model_name} 重要特征 (前10个):")
+            print(feature_importance.head(10))
+            
+            # 绘制特征重要性图
+            plt.figure(figsize=(10, 8))
+            top_features = feature_importance.head(15)
+            plt.barh(top_features['feature'], top_features['importance'])
+            plt.xlabel('特征重要性')
+            plt.title(f'{best_model_name} 特征重要性')
+            plt.tight_layout()
+            importance_path = f'/Users/qingguo/Documents/project/carPricePredict/feature_importance_{best_model_name}.png'
+            plt.savefig(importance_path, dpi=300, bbox_inches='tight')
+            plt.show()
+        
+        return best_model
+        
         # 6. 预测生成
         print("6. 预测生成...")
-        # 使用最佳模型在测试集上进行预测
-        test_probabilities = best_model.predict_proba(X_test)[:, 1]
-        test_predictions = best_model.predict(X_test)
         
-        # 计算预测置信度分布
+        # 使用最佳模型进行预测
+        test_predictions = best_model.predict_proba(X_test)[:, 1]
+        
+        # 创建提交文件
+        submission = pd.DataFrame({
+            '贷款ID': test_df['贷款ID'],
+            '违约概率': test_predictions
+        })
+        
+        # 保存提交文件
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        submission_filename = f"{student_id}submission_{timestamp}.csv"
+        submission.to_csv(submission_filename, index=False)
+        
+        print(f"\n提交文件已保存: {submission_filename}")
+        print(f"预测结果分布:")
+        print(f"  违约概率 < 0.5: {(test_predictions < 0.5).sum()}")
+        print(f"  违约概率 >= 0.5: {(test_predictions >= 0.5).sum()}")
+        
+        # 7. 结果总结
+        print("\n7. 结果总结:")
+        print(f"  训练样本数: {len(X)}")
+        print(f"  特征数: {X.shape[1]}")
+        print(f"  模型数: {len(models)}")
+        print(f"  最佳模型: {best_model_name}")
+        print(f"  最佳AUC: {cv_scores[best_model_name]:.4f}")
+        print(f"  测试预测数: {len(test_predictions)}")
+        
+        return best_model, submission
+        
         print(f"\n预测概率分布:")
         print(f"预测概率均值: {test_probabilities.mean():.4f}")
         print(f"预测概率标准差: {test_probabilities.std():.4f}")
-        print(f"预测概率范围: [{test_probabilities.min():.4f}, {test_probabilities.max():.4f}]")
+        print(f"预测概率最小值: {test_probabilities.min():.4f}")
+        print(f"预测概率最大值: {test_probabilities.max():.4f}")
         
-        print(f"\n预测结果统计:")
+        # 创建提交文件
+        submission = pd.DataFrame({
+            '贷款ID': test_df['贷款ID'],
+            '违约概率': test_probabilities
+        })
+        
+        # 保存提交文件
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        submission_filename = f"{student_id}submission_{timestamp}.csv"
+        submission.to_csv(submission_filename, index=False)
+        
+        print(f"\n提交文件已保存: {submission_filename}")
+        print(f"提交文件形状: {submission.shape}")
+        
+        return best_model
+        
+        print(f"预测结果分布:")
         print(f"违约预测数量: {sum(test_predictions)}")
         print(f"违约预测比例: {sum(test_predictions) / len(test_predictions) * 100:.2f}%")
         
