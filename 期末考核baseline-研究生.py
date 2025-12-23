@@ -9,8 +9,9 @@
 import pandas as pd
 import numpy as np
 from sklearn.preprocessing import LabelEncoder, StandardScaler
-from sklearn.model_selection import train_test_split, cross_val_score
+from sklearn.model_selection import train_test_split, cross_val_score, GridSearchCV
 from sklearn.linear_model import LogisticRegression
+from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import accuracy_score, classification_report, roc_auc_score
 import matplotlib.pyplot as plt
 import matplotlib.font_manager as fm
@@ -205,7 +206,7 @@ def data_cleaning_stage():
 def eda_stage():
     """探索性数据分析阶段 - 闭包函数"""
     def perform_eda():
-        print("\n=== 探索性数据分析阶段 ===")
+        print("=== 探索性数据分析阶段 ===")
         
         # 检查依赖项
         dependencies = {
@@ -222,68 +223,81 @@ def eda_stage():
         if cached_result is not None:
             return cached_result
         
-        train = global_data['train_clean']
-        test = global_data['test_clean']
+        # 获取清洗后的数据
+        train = global_data['train_clean'].copy()
+        test = global_data['test_clean'].copy()
         
-        print("1. 基础统计分析...")
-        # 数值特征描述性统计
-        numeric_features = train.select_dtypes(include=[np.number]).columns
-        print(f"数值特征数量: {len(numeric_features)}")
-        print("数值特征统计:")
-        print(train[numeric_features].describe())
+        print(f"EDA分析 - 训练集: {train.shape}, 测试集: {test.shape}")
         
-        # 分类特征分析
-        categorical_features = train.select_dtypes(include=['object']).columns
-        print(f"\n分类特征数量: {len(categorical_features)}")
-        for col in categorical_features[:5]:  # 只显示前5个分类特征
-            print(f"\n{col} - 唯一值数量: {train[col].nunique()}")
+        # 1. 数据概览
+        print("1. 数据概览...")
+        print("训练集信息:")
+        print(train.info())
+        print("\n测试集信息:")
+        print(test.info())
+        
+        # 2. 数值特征分析
+        print("2. 数值特征分析...")
+        numeric_cols = train.select_dtypes(include=[np.number]).columns
+        
+        # 创建综合可视化
+        fig, axes = plt.subplots(2, 2, figsize=(15, 12))
+        fig.suptitle('数据探索性分析', fontsize=16)
+        
+        # 训练集标签分布
+        if '是否违约' in train.columns:
+            train['是否违约'].value_counts().plot(kind='bar', ax=axes[0,0], color=['skyblue', 'lightcoral'])
+            axes[0,0].set_title('训练集标签分布')
+            axes[0,0].set_xlabel('是否违约')
+            axes[0,0].set_ylabel('数量')
+            axes[0,0].tick_params(axis='x', rotation=0)
+        
+        # 贷款总额分布
+        if '贷款总额' in train.columns:
+            train['贷款总额'].hist(bins=50, ax=axes[0,1], color='lightblue', alpha=0.7)
+            axes[0,1].set_title('贷款总额分布')
+            axes[0,1].set_xlabel('贷款总额')
+            axes[0,1].set_ylabel('频次')
+        
+        # 相关性热力图（前10个数值特征）
+        if len(numeric_cols) > 0:
+            corr_cols = numeric_cols[:min(10, len(numeric_cols))]
+            if '是否违约' in train.columns:
+                corr_cols = list(corr_cols) + ['是否违约'] if '是否违约' not in corr_cols else corr_cols
+            
+            corr_matrix = train[corr_cols].corr()
+            sns.heatmap(corr_matrix, annot=True, cmap='coolwarm', center=0, ax=axes[1,0])
+            axes[1,0].set_title('特征相关性热力图')
+        
+        # 缺失值分析
+        missing_data = train.isnull().sum()
+        missing_data = missing_data[missing_data > 0].sort_values(ascending=False)
+        if len(missing_data) > 0:
+            missing_data.plot(kind='bar', ax=axes[1,1], color='orange')
+            axes[1,1].set_title('缺失值分析')
+            axes[1,1].set_xlabel('特征')
+            axes[1,1].set_ylabel('缺失值数量')
+            axes[1,1].tick_params(axis='x', rotation=45)
+        else:
+            axes[1,1].text(0.5, 0.5, '无缺失值', ha='center', va='center', transform=axes[1,1].transAxes)
+            axes[1,1].set_title('缺失值分析')
+        
+        plt.tight_layout()
+        plt.savefig('/Users/qingguo/Documents/project/carPricePredict/eda_visualization.png', dpi=300, bbox_inches='tight')
+        plt.show()
+        
+        # 3. 特征统计
+        print("3. 特征统计...")
+        print("数值特征描述性统计:")
+        print(train[numeric_cols].describe())
+        
+        print("\n分类特征统计:")
+        categorical_cols = train.select_dtypes(include=['object']).columns
+        for col in categorical_cols[:5]:  # 只显示前5个分类特征
+            print(f"\n{col}:")
             print(train[col].value_counts().head())
         
-        print("\n2. 目标变量分析...")
-        if '是否违约' in train.columns:
-            target_dist = train['是否违约'].value_counts()
-            print("目标变量分布:")
-            print(target_dist)
-            print(f"违约率: {target_dist[1] / len(train) * 100:.2f}%")
-            
-            # 创建目标变量分布图 - 智能处理中文显示
-            plt.figure(figsize=(10, 6))
-            
-            # 检测是否使用中文字体
-            current_font = plt.rcParams['font.sans-serif'][0]
-            use_chinese = current_font not in ['DejaVu Sans', 'Arial', 'Helvetica']
-            
-            plt.subplot(1, 2, 1)
-            train['是否违约'].value_counts().plot(kind='bar')
-            if use_chinese:
-                plt.title('目标变量分布')
-                plt.xlabel('是否违约')
-                plt.ylabel('数量')
-            else:
-                plt.title('Target Variable Distribution')
-                plt.xlabel('Default Status')
-                plt.ylabel('Count')
-            
-            plt.subplot(1, 2, 2)
-            if use_chinese:
-                plt.pie(train['是否违约'].value_counts().values, 
-                       labels=['正常', '违约'], autopct='%1.1f%%')
-                plt.title('目标变量比例')
-            else:
-                plt.pie(train['是否违约'].value_counts().values, 
-                       labels=['Normal', 'Default'], autopct='%1.1f%%')
-                plt.title('Target Variable Proportion')
-            
-            plt.tight_layout()
-            plt.savefig('/Users/qingguo/Documents/project/carPricePredict/eda_visualization.png', dpi=300, bbox_inches='tight')
-            plt.show()
-            print("✓ EDA可视化已保存")
-        
-        result = {
-            'numeric_features': numeric_features,
-            'categorical_features': categorical_features,
-            'target_distribution': target_dist if '是否违约' in train.columns else None
-        }
+        result = {'eda_completed': True}
         
         # 保存缓存
         save_cache(cache_key, result, dependencies)
@@ -295,7 +309,7 @@ def eda_stage():
 def feature_engineering_stage():
     """特征工程阶段 - 闭包函数"""
     def engineer_features():
-        print("\n=== 特征工程阶段 ===")
+        print("=== 特征工程阶段 ===")
         
         # 检查依赖项
         dependencies = {
@@ -312,111 +326,61 @@ def feature_engineering_stage():
         if cached_result is not None:
             return cached_result
         
+        # 获取清洗后的数据
         train = global_data['train_clean'].copy()
         test = global_data['test_clean'].copy()
         
-        print("1. 特征编码...")
-        # 对分类特征进行标签编码
+        print(f"特征工程 - 训练集: {train.shape}, 测试集: {test.shape}")
+        
+        # 1. 标签编码
+        print("1. 标签编码...")
+        label_encoders = {}
         categorical_cols = train.select_dtypes(include=['object']).columns
         
         for col in categorical_cols:
-            le = LabelEncoder()
-            # 合并训练集和测试集的唯一值进行编码
-            all_values = pd.concat([train[col], test[col]], axis=0).astype(str)
-            le.fit(all_values)
-            
-            train[col] = le.transform(train[col].astype(str))
-            test[col] = le.transform(test[col].astype(str))
+            if col not in ['贷款ID']:  # 跳过ID列
+                le = LabelEncoder()
+                # 合并训练集和测试集的标签进行编码，避免测试集出现未知标签
+                combined_values = pd.concat([train[col], test[col]], axis=0).astype(str)
+                le.fit(combined_values)
+                
+                train[col] = le.transform(train[col].astype(str))
+                test[col] = le.transform(test[col].astype(str))
+                
+                label_encoders[col] = le
         
-        print("2. 特征构造...")
-        # 构造新特征
-        # 2.1 贷款相关特征
-        if '贷款总额' in train.columns and '月还款额' in train.columns:
-            train['还款比例'] = train['月还款额'] / train['贷款总额']
-            test['还款比例'] = test['月还款额'] / test['贷款总额']
+        # 2. 特征组合
+        print("2. 特征组合...")
+        # 创建一些派生特征
+        if '贷款总额' in train.columns and '月供' in train.columns:
+            train['贷款收入比'] = train['贷款总额'] / (train['月供'] * 12 + 1)  # 避免除零
+            test['贷款收入比'] = test['贷款总额'] / (test['月供'] * 12 + 1)
         
-        # 2.2 信用评分相关特征
-        if '信用评分低值' in train.columns and '信用评分高值' in train.columns:
-            train['信用评分范围'] = train['信用评分高值'] - train['信用评分低值']
-            test['信用评分范围'] = test['信用评分高值'] - test['信用评分低值']
-            
-            train['信用评分均值'] = (train['信用评分低值'] + train['信用评分高值']) / 2
-            test['信用评分均值'] = (test['信用评分低值'] + test['信用评分高值']) / 2
+        if '信用卡数量' in train.columns and '信用卡总余额' in train.columns:
+            train['平均信用卡余额'] = train['信用卡总余额'] / (train['信用卡数量'] + 1)
+            test['平均信用卡余额'] = test['信用卡总余额'] / (test['信用卡数量'] + 1)
         
-        # 2.3 负债收入比相关特征
-        if '负债收入比' in train.columns:
-            # 创建负债收入ospin桶
-            train['负债收入比等级'] = pd.cut(train['负债收入比'], 
-                                         bins=[0, 10, 20, 30, 100], 
-                                         labels=[0, 1, 2, 3])
-            test['负债收入比等级'] = pd.cut(test['负债收入比'], 
-                                         bins=[0, 10, 20, 30, 100], 
-                                         labels=[0, 1, 2, 3])
+        # 3. 特征标准化
+        print("3. 特征标准化...")
+        scaler = StandardScaler()
+        numeric_cols = train.select_dtypes(include=[np.number]).columns
+        numeric_cols = [col for col in numeric_cols if col != '是否违约']  # 排除标签
         
-        # 2.4 工作年限相关特征
-        if '工作年限' in train.columns:
-            # 将工作年限转换为数值
-            work_year_map = {
-                '< 1 year': 0,
-                '1 year': 1,
-                '2 years': 2,
-                '3 years': 3,
-                '4 years': 4,
-                '5 years': 5,
-                '6 years': 6,
-                '7 years': 7,
-                '8 years': 8,
-                '9 years': 9,
-                '10+ years': 10
-            }
-            
-            train['工作年限数值'] = train['工作年限'].map(work_year_map).fillna(5)
-            test['工作年限数值'] = test['工作年限'].map(work_year_map).fillna(5)
+        # 只在训练集上拟合scaler
+        scaler.fit(train[numeric_cols])
         
-        print("3. 特征选择...")
-        # 移除低方差特征
-        from sklearn.feature_selection import VarianceThreshold
+        # 转换训练集和测试集
+        train[numeric_cols] = scaler.transform(train[numeric_cols])
+        test[numeric_cols] = scaler.transform(test[numeric_cols])
         
-        # 分离特征和标签
-        if '是否违约' in train.columns:
-            X_train = train.drop(['是否违约'], axis=1)
-            y_train = train['是否违约']
-        else:
-            X_train = train
-            y_train = None
+        print(f"特征工程完成 - 训练集: {train.shape}, 测试集: {test.shape}")
         
-        X_test = test
-        
-        # 应用方差阈值
-        selector = VarianceThreshold(threshold=0.01)
-        X_train_selected = selector.fit_transform(X_train)
-        X_test_selected = selector.transform(X_test)
-        
-        # 获取选择的特征名称
-        selected_features = X_train.columns[selector.get_support()]
-        
-        print(f"原始特征数量: {X_train.shape[1]}")
-        print(f"选择后特征数量: {len(selected_features)}")
-        
-        # 重新构建DataFrame
-        train_fe = pd.DataFrame(X_train_selected, columns=selected_features, index=train.index)
-        test_fe = pd.DataFrame(X_test_selected, columns=selected_features, index=test.index)
-        
-        if y_train is not None:
-            train_fe['是否违约'] = y_train
-        
-        print("4. 最终缺失值处理...")
-        # 确保没有缺失值
-        train_fe = train_fe.fillna(0)
-        test_fe = test_fe.fillna(0)
-        
-        # 确保所有数值都是有限的
-        train_fe = train_fe.replace([np.inf, -np.inf], 0)
-        test_fe = test_fe.replace([np.inf, -np.inf], 0)
-        
-        print(f"特征工程完成 - 训练集: {train_fe.shape}, 测试集: {test_fe.shape}")
-        
-        result = {'train_fe': train_fe, 'test_fe': test_fe}
+        result = {
+            'train_fe': train,
+            'test_fe': test,
+            'scaler': scaler,
+            'label_encoders': label_encoders
+        }
         
         # 保存缓存
         save_cache(cache_key, result, dependencies)
@@ -426,9 +390,9 @@ def feature_engineering_stage():
     return engineer_features
 
 def modeling_stage():
-    """数据建模阶段 - 闭包函数"""
+    """建模阶段 - 闭包函数"""
     def build_models():
-        print("\n=== 数据建模阶段 ===")
+        print("=== 建模阶段 ===")
         
         # 检查依赖项
         dependencies = {
@@ -445,76 +409,198 @@ def modeling_stage():
         if cached_result is not None:
             return cached_result
         
-        train_fe = global_data['train_fe']
-        test_fe = global_data['test_fe']
+        # 获取特征工程后的数据
+        train_fe = global_data['train_fe'].copy()
+        test_fe = global_data['test_fe'].copy()
         
-        print("1. 数据标准化...")
-        scaler = StandardScaler()
+        print(f"建模 - 训练集: {train_fe.shape}, 测试集: {test_fe.shape}")
         
+        # 1. 准备数据
+        print("1. 数据准备...")
         # 分离特征和标签
-        X_train = train_fe.drop(['是否违约'], axis=1)
-        y_train = train_fe['是否违约']
-        X_test = test_fe
+        X = train_fe.drop(columns=['是否违约', '贷款ID'])
+        y = train_fe['是否违约']
         
-        # 确保没有缺失值和无限值
-        X_train = X_train.fillna(0).replace([np.inf, -np.inf], 0)
-        X_test = X_test.fillna(0).replace([np.inf, -np.inf], 0)
+        # 测试集特征（无标签）
+        X_test = test_fe.drop(columns=['贷款ID'])
         
-        X_train_scaled = scaler.fit_transform(X_train)
-        X_test_scaled = scaler.transform(X_test)
+        print(f"特征维度: {X.shape}, 标签维度: {y.shape}")
         
-        print("2. 模型训练...")
+        # 2. 模型训练与交叉验证
+        print("2. 模型训练与交叉验证...")
+        
+        # 定义模型和超参数空间
         models = {}
+        cv_scores = {}
         
-        # 2.1 逻辑回归模型
-        print("训练逻辑回归模型...")
-        lr_model = LogisticRegression(random_state=42, max_iter=1000)
-        lr_model.fit(X_train_scaled, y_train)
-        models['LogisticRegression'] = lr_model
+        # Logistic Regression with GridSearchCV
+        print("2.1 Logistic Regression with Cross-Validation...")
+        lr_param_grid = {
+            'C': [0.1, 1, 10],
+            'penalty': ['l1', 'l2'],
+            'class_weight': [None, 'balanced']
+        }
         
-        # 2.2 交叉验证评估
-        print("3. 模型评估...")
-        cv_scores = cross_val_score(lr_model, X_train_scaled, y_train, cv=5, scoring='accuracy')
-        print(f"逻辑回归交叉验证准确率: {cv_scores.mean():.4f} (+/- {cv_scores.std() * 2:.4f})")
+        lr_grid = GridSearchCV(
+            LogisticRegression(max_iter=1000, random_state=42),
+            lr_param_grid,
+            cv=3,
+            scoring='roc_auc',
+            n_jobs=-1
+        )
         
-        # 2.3 特征重要性分析
-        if hasattr(lr_model, 'coef_'):
-            feature_importance = pd.DataFrame({
-                'feature': X_train.columns,
-                'importance': np.abs(lr_model.coef_[0])
-            }).sort_values('importance', ascending=False)
-            
-            print("重要特征 (前10个):")
-            print(feature_importance.head(10))
-            
-            # 绘制特征重要性图
-            plt.figure(figsize=(10, 8))
-            top_features = feature_importance.head(15)
-            plt.barh(top_features['feature'], top_features['importance'])
-            plt.xlabel('特征重要性')
-            plt.title('逻辑回归特征重要性')
-            plt.tight_layout()
-            plt.savefig('/Users/qingguo/Documents/project/carPricePredict/feature_importance.png', dpi=300, bbox_inches='tight')
-            plt.show()
+        lr_grid.fit(X, y)
+        models['LogisticRegression'] = lr_grid.best_estimator_
+        cv_scores['LogisticRegression'] = lr_grid.best_score_
         
-        print("4. 预测生成...")
-        # 在测试集上进行预测
-        test_probabilities = lr_model.predict_proba(X_test_scaled)[:, 1]
-        test_predictions = lr_model.predict(X_test_scaled)
+        print(f"Logistic Regression - Best AUC: {lr_grid.best_score_:.4f}")
+        print(f"Best params: {lr_grid.best_params_}")
         
-        print(f"预测结果统计:")
+        # Random Forest with GridSearchCV
+        print("2.2 Random Forest with Cross-Validation...")
+        rf_param_grid = {
+            'n_estimators': [50, 100, 200],
+            'max_depth': [5, 10, 15, None],
+            'class_weight': [None, 'balanced']
+        }
+        
+        rf_grid = GridSearchCV(
+            RandomForestClassifier(random_state=42),
+            rf_param_grid,
+            cv=3,
+            scoring='roc_auc',
+            n_jobs=-1
+        )
+        
+        rf_grid.fit(X, y)
+        models['RandomForest'] = rf_grid.best_estimator_
+        cv_scores['RandomForest'] = rf_grid.best_score_
+        
+        print(f"Random Forest - Best AUC: {rf_grid.best_score_:.4f}")
+        print(f"Best params: {rf_grid.best_params_}")
+        
+        # 3. 选择最佳模型
+        print("3. 选择最佳模型...")
+        best_model_name = max(cv_scores, key=cv_scores.get)
+        best_model = models[best_model_name]
+        
+        print(f"最佳模型: {best_model_name} (AUC: {cv_scores[best_model_name]:.4f})")
+        
+        # 4. 特征重要性分析
+        print("4. 特征重要性分析...")
+        
+        # 为每个模型绘制特征重要性
+        for model_name, model in models.items():
+            if hasattr(model, 'feature_importances_'):
+                # 树模型特征重要性
+                feature_importance = pd.DataFrame({
+                    'feature': X.columns,
+                    'importance': model.feature_importances_
+                }).sort_values('importance', ascending=False)
+                
+                print(f"\n{model_name} 重要特征 (前10个):")
+                print(feature_importance.head(10))
+                
+                # 绘制特征重要性图
+                plt.figure(figsize=(10, 8))
+                top_features = feature_importance.head(15)
+                plt.barh(top_features['feature'], top_features['importance'])
+                plt.xlabel('特征重要性')
+                plt.title(f'{model_name} 特征重要性')
+                plt.tight_layout()
+                importance_path = f'/Users/qingguo/Documents/project/carPricePredict/feature_importance_{model_name}.png'
+                plt.savefig(importance_path, dpi=300, bbox_inches='tight')
+                plt.show()
+                
+            elif hasattr(model, 'coef_'):
+                # 线性模型特征重要性
+                feature_importance = pd.DataFrame({
+                    'feature': X.columns,
+                    'importance': np.abs(model.coef_[0])
+                }).sort_values('importance', ascending=False)
+                
+                print(f"\n{model_name} 重要特征 (前10个):")
+                print(feature_importance.head(10))
+                
+                # 绘制特征重要性图
+                plt.figure(figsize=(10, 8))
+                top_features = feature_importance.head(15)
+                plt.barh(top_features['feature'], top_features['importance'])
+                plt.xlabel('特征重要性')
+                plt.title(f'{model_name} 特征重要性')
+                plt.tight_layout()
+                importance_path = f'/Users/qingguo/Documents/project/carPricePredict/feature_importance_{model_name}.png'
+                plt.savefig(importance_path, dpi=300, bbox_inches='tight')
+                plt.show()
+        
+        # 5. 模型性能对比
+        print("5. 模型性能对比...")
+        performance_df = pd.DataFrame({
+            'Model': list(cv_scores.keys()),
+            'CV_AUC': list(cv_scores.values())
+        }).sort_values('CV_AUC', ascending=False)
+        
+        print("\n模型交叉验证性能排名:")
+        print(performance_df)
+        
+        # 绘制模型性能对比图
+        plt.figure(figsize=(10, 6))
+        plt.bar(performance_df['Model'], performance_df['CV_AUC'])
+        plt.xlabel('模型')
+        plt.ylabel('交叉验证AUC')
+        plt.title('模型性能对比')
+        plt.xticks(rotation=45)
+        plt.tight_layout()
+        plt.savefig('/Users/qingguo/Documents/project/carPricePredict/model_performance_comparison.png', dpi=300, bbox_inches='tight')
+        plt.show()
+        
+        # 6. 预测生成
+        print("6. 预测生成...")
+        # 使用最佳模型在测试集上进行预测
+        test_probabilities = best_model.predict_proba(X_test)[:, 1]
+        test_predictions = best_model.predict(X_test)
+        
+        # 计算预测置信度分布
+        print(f"\n预测概率分布:")
+        print(f"预测概率均值: {test_probabilities.mean():.4f}")
+        print(f"预测概率标准差: {test_probabilities.std():.4f}")
+        print(f"预测概率范围: [{test_probabilities.min():.4f}, {test_probabilities.max():.4f}]")
+        
+        print(f"\n预测结果统计:")
         print(f"违约预测数量: {sum(test_predictions)}")
         print(f"违约预测比例: {sum(test_predictions) / len(test_predictions) * 100:.2f}%")
         
+        # 绘制预测概率分布图
+        plt.figure(figsize=(12, 5))
+        
+        plt.subplot(1, 2, 1)
+        plt.hist(test_probabilities, bins=50, alpha=0.7, color='skyblue', edgecolor='black')
+        plt.xlabel('预测概率')
+        plt.ylabel('频次')
+        plt.title('预测概率分布')
+        plt.axvline(x=0.5, color='red', linestyle='--', label='决策阈值')
+        plt.legend()
+        
+        plt.subplot(1, 2, 2)
+        prediction_counts = pd.Series(test_predictions).value_counts()
+        plt.pie(prediction_counts.values, labels=['正常', '违约'], autopct='%1.1f%%', startangle=90)
+        plt.title('预测结果分布')
+        
+        plt.tight_layout()
+        plt.savefig('/Users/qingguo/Documents/project/carPricePredict/prediction_analysis.png', dpi=300, bbox_inches='tight')
+        plt.show()
+        
         result = {
-            'train_scaled': pd.DataFrame(X_train_scaled, columns=X_train.columns, index=train_fe.index),
-            'test_scaled': pd.DataFrame(X_test_scaled, columns=X_train.columns, index=test_fe.index),
+            'train_features': X,
+            'test_features': X_test,
+            'train_target': y,
             'models': models,
-            'best_model': lr_model,
-            'best_model_name': 'LogisticRegression',
+            'best_model': best_model,
+            'best_model_name': best_model_name,
             'test_predictions': test_predictions,
             'test_probabilities': test_probabilities,
-            'scaler': scaler
+            'cv_scores': cv_scores,
+            'performance_df': performance_df
         }
         
         # 保存缓存
@@ -532,7 +618,6 @@ def submission_stage():
         # 检查依赖项
         dependencies = {
             'test_predictions': global_data.get('test_predictions'),
-            'test_probabilities': global_data.get('test_probabilities'),
             'test_clean': global_data.get('test_clean')
         }
         
@@ -614,13 +699,13 @@ def main():
         print("特征工程阶段失败")
         return
     
-    # 阶段4: 数据建模
+    # 阶段4: 建模
     modeling_func = modeling_stage()
     modeling_result = modeling_func()
     if modeling_result is not None:
         global_data.update(modeling_result)
     else:
-        print("数据建模阶段失败")
+        print("建模阶段失败")
         return
     
     # 阶段5: 生成提交文件
@@ -628,23 +713,20 @@ def main():
     submission_result = submission_func()
     if submission_result is not None:
         global_data['submission'] = submission_result
-        print("✓ 所有阶段执行完成！")
+        print("\n=== 执行完成 ===")
+        print(f"✓ 所有阶段执行成功")
+        print(f"✓ 提交文件已生成")
+        print(f"✓ 缓存已保存")
+        print(f"✓ 可视化图表已生成")
+        print("\n总结:")
+        print(f"- 数据清洗: {global_data['train_clean'].shape[0]} 条训练样本")
+        print(f"- 特征工程: {global_data['train_fe'].shape[1]} 个特征")
+        print(f"- 模型数量: {len(global_data['models'])}")
+        print(f"- 最佳模型: {global_data['best_model_name']}")
+        print(f"- 测试集预测数量: {len(global_data['test_predictions'])}")
+        print("="*60)
     else:
-        print("提交文件生成失败")
-        return
-    
-    # 最终总结
-    print("\n" + "="*60)
-    print("增强版汽车价格预测基线执行完成！")
-    print("="*60)
-    print(f"最终数据形状:")
-    print(f"- 清洗后训练集: {global_data['train_clean'].shape}")
-    print(f"- 特征工程训练集: {global_data['train_fe'].shape}")
-    print(f"- 标准化训练集: {global_data['train_scaled'].shape}")
-    print(f"- 模型数量: {len(global_data['models'])}")
-    print(f"- 最佳模型: {global_data['best_model_name']}")
-    print(f"- 测试集预测数量: {len(global_data['test_predictions'])}")
-    print("="*60)
+        print("提交文件生成阶段失败")
 
 # 如果作为主程序运行，执行main函数
 if __name__ == "__main__":
