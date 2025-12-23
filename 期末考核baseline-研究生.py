@@ -13,6 +13,7 @@ from sklearn.model_selection import train_test_split, cross_val_score
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score, classification_report, roc_auc_score
 import matplotlib.pyplot as plt
+import matplotlib.font_manager as fm
 import seaborn as sns
 import pickle
 import hashlib
@@ -21,6 +22,31 @@ from datetime import datetime
 from typing import Dict, Any, Tuple
 import warnings
 warnings.filterwarnings('ignore')
+
+# 设置matplotlib支持中文字体（macOS系统）
+# 优先使用系统自带的中文字体
+def setup_chinese_font():
+    """设置中文字体配置"""
+    chinese_fonts = ['Heiti TC', 'STHeiti', 'Arial Unicode MS', 'LiHei Pro', 'LiSong Pro']
+    
+    for font_name in chinese_fonts:
+        try:
+            # 检查字体是否可用
+            available_fonts = [f.name for f in fm.fontManager.ttflist]
+            if font_name in available_fonts:
+                plt.rcParams['font.sans-serif'] = [font_name]
+                plt.rcParams['axes.unicode_minus'] = False
+                print(f"✓ 使用中文字体: {font_name}")
+                return True
+        except Exception as e:
+            continue
+    
+    print("⚠ 未找到合适的中文字体，图表中的中文可能显示为方框")
+    print("  建议安装中文字体或使用英文字体替代")
+    return False
+
+# 初始化字体配置
+setup_chinese_font()
 
 # 全局数据存储
 global_data = {}
@@ -220,37 +246,38 @@ def eda_stage():
             print(target_dist)
             print(f"违约率: {target_dist[1] / len(train) * 100:.2f}%")
             
-            # 创建目标变量分布图
+            # 创建目标变量分布图 - 智能处理中文显示
             plt.figure(figsize=(10, 6))
+            
+            # 检测是否使用中文字体
+            current_font = plt.rcParams['font.sans-serif'][0]
+            use_chinese = current_font not in ['DejaVu Sans', 'Arial', 'Helvetica']
+            
             plt.subplot(1, 2, 1)
             train['是否违约'].value_counts().plot(kind='bar')
-            plt.title('目标变量分布')
-            plt.xlabel('是否违约')
-            plt.ylabel('数量')
+            if use_chinese:
+                plt.title('目标变量分布')
+                plt.xlabel('是否违约')
+                plt.ylabel('数量')
+            else:
+                plt.title('Target Variable Distribution')
+                plt.xlabel('Default Status')
+                plt.ylabel('Count')
             
             plt.subplot(1, 2, 2)
-            plt.pie(train['是否违约'].value_counts().values, 
-                   labels=['正常', '违约'], autopct='%1.1f%%')
-            plt.title('目标变量比例')
+            if use_chinese:
+                plt.pie(train['是否违约'].value_counts().values, 
+                       labels=['正常', '违约'], autopct='%1.1f%%')
+                plt.title('目标变量比例')
+            else:
+                plt.pie(train['是否违约'].value_counts().values, 
+                       labels=['Normal', 'Default'], autopct='%1.1f%%')
+                plt.title('Target Variable Proportion')
             
             plt.tight_layout()
             plt.savefig('/Users/qingguo/Documents/project/carPricePredict/eda_visualization.png', dpi=300, bbox_inches='tight')
             plt.show()
             print("✓ EDA可视化已保存")
-        
-        print("\n3. 特征相关性分析...")
-        # 计算数值特征之间的相关性
-        if len(numeric_features) > 1:
-            correlation_matrix = train[numeric_features].corr()
-            
-            # 创建相关性热力图
-            plt.figure(figsize=(12, 10))
-            sns.heatmap(correlation_matrix, annot=True, cmap='coolwarm', center=0, fmt='.2f')
-            plt.title('数值特征相关性热力图')
-            plt.tight_layout()
-            plt.savefig('/Users/qingguo/Documents/project/carPricePredict/correlation_heatmap.png', dpi=300, bbox_inches='tight')
-            plt.show()
-            print("✓ 相关性热力图已保存")
         
         result = {
             'numeric_features': numeric_features,
@@ -318,13 +345,13 @@ def feature_engineering_stage():
         
         # 2.3 负债收入比相关特征
         if '负债收入比' in train.columns:
-            # 创建负债收入比分桶
+            # 创建负债收入ospin桶
             train['负债收入比等级'] = pd.cut(train['负债收入比'], 
-                                           bins=[0, 10, 20, 30, 100], 
-                                           labels=['低', '中低', '中高', '高'])
+                                         bins=[0, 10, 20, 30, 100], 
+                                         labels=[0, 1, 2, 3])
             test['负债收入比等级'] = pd.cut(test['负债收入比'], 
-                                          bins=[0, 10, 20, 30, 100], 
-                                          labels=['低', '中低', '中高', '高'])
+                                         bins=[0, 10, 20, 30, 100], 
+                                         labels=[0, 1, 2, 3])
         
         # 2.4 工作年限相关特征
         if '工作年限' in train.columns:
