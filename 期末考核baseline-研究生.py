@@ -16,11 +16,7 @@ from sklearn.metrics import accuracy_score, classification_report, roc_auc_score
 import matplotlib.pyplot as plt
 import matplotlib.font_manager as fm
 import seaborn as sns
-import pickle
-import hashlib
-import os
 from datetime import datetime
-from typing import Dict, Any, Tuple
 import warnings
 warnings.filterwarnings('ignore')
 
@@ -52,71 +48,7 @@ setup_chinese_font()
 # 全局数据存储
 global_data = {}
 
-# 缓存目录设置
-CACHE_DIR = '/Users/qingguo/Documents/project/carPricePredict/cache'
-os.makedirs(CACHE_DIR, exist_ok=True)
-
-def get_cache_path(stage_name: str) -> str:
-    """获取缓存文件路径"""
-    return os.path.join(CACHE_DIR, f'stage_{stage_name}.pkl')
-
-def get_dependency_hash(dependencies: Dict[str, Any]) -> str:
-    """计算依赖项的哈希值"""
-    # 将依赖项转换为字符串并计算哈希
-    dep_str = str(sorted(dependencies.items()))
-    return hashlib.md5(dep_str.encode()).hexdigest()
-
-def load_cache(stage_name: str, dependencies: Dict[str, Any]) -> Any:
-    """加载缓存数据"""
-    cache_path = get_cache_path(stage_name)
-    
-    if not os.path.exists(cache_path):
-        return None
-    
-    try:
-        with open(cache_path, 'rb') as f:
-            cached_data = pickle.load(f)
-        
-        # 检查依赖项是否发生变化
-        cached_hash = cached_data.get('dependency_hash', '')
-        current_hash = get_dependency_hash(dependencies)
-        
-        if cached_hash == current_hash:
-            print(f"✓ {stage_name}: 使用缓存数据")
-            return cached_data['data']
-        else:
-            print(f"✗ {stage_name}: 依赖项发生变化，重新计算")
-            return None
-    except Exception as e:
-        print(f"✗ {stage_name}: 缓存加载失败 - {e}")
-        return None
-
-def save_cache(stage_name: str, data: Any, dependencies: Dict[str, Any]) -> None:
-    """保存缓存数据"""
-    cache_path = get_cache_path(stage_name)
-    
-    try:
-        cache_data = {
-            'data': data,
-            'dependency_hash': get_dependency_hash(dependencies),
-            'timestamp': datetime.now()
-        }
-        
-        with open(cache_path, 'wb') as f:
-            pickle.dump(cache_data, f)
-        
-        print(f"✓ {stage_name}: 缓存已保存")
-    except Exception as e:
-        print(f"✗ {stage_name}: 缓存保存失败 - {e}")
-
-def check_dependencies(dependencies: Dict[str, Any]) -> bool:
-    """检查依赖项是否存在"""
-    for dep_name, dep_value in dependencies.items():
-        # 使用is None检查，避免DataFrame的布尔评估问题
-        if dep_value is None:
-            print(f"✗ 依赖项缺失: {dep_name}")
-            return False
-    return True
+from cache_util import load_cache, save_cache, check_dependencies
 
 def data_cleaning_stage():
     """数据清洗阶段 - 闭包函数"""
@@ -685,8 +617,6 @@ def modeling_stage():
             plt.savefig(importance_path, dpi=300, bbox_inches='tight')
             plt.show()
         
-        return best_model
-        
         # 6. 预测生成
         print("6. 预测生成...")
         
@@ -718,8 +648,6 @@ def modeling_stage():
         print(f"  最佳AUC: {cv_scores[best_model_name]:.4f}")
         print(f"  测试预测数: {len(test_predictions)}")
         
-        return best_model, submission
-        
         print(f"\n预测概率分布:")
         print(f"预测概率均值: {test_probabilities.mean():.4f}")
         print(f"预测概率标准差: {test_probabilities.std():.4f}")
@@ -739,8 +667,6 @@ def modeling_stage():
         
         print(f"\n提交文件已保存: {submission_filename}")
         print(f"提交文件形状: {submission.shape}")
-        
-        return best_model
         
         print(f"预测结果分布:")
         print(f"违约预测数量: {sum(test_predictions)}")
@@ -829,7 +755,6 @@ def submission_stage():
 def main():
     """主执行函数"""
     print("开始执行增强版汽车价格预测基线...")
-    print(f"缓存目录: {CACHE_DIR}")
     
     # 阶段1: 数据加载
     print("\n=== 阶段0: 数据加载 ===")
