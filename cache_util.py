@@ -3,6 +3,7 @@ import pickle
 import hashlib
 import os
 from typing import Dict, Any, Tuple
+from datetime import datetime
 
 # 缓存目录设置
 CACHE_DIR = '/Users/qingguo/Documents/project/carPricePredict/cache'

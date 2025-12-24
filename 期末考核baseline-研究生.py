@@ -921,19 +921,19 @@ def submission_stage():
 def main():
     """主函数 - 执行完整的机器学习流程"""
     print("=== 贷款违约预测项目 ===")
-    print(f"学生ID: {student_id}")
     print(f"开始时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     
     try:
         # 1. 数据加载阶段
-        print("\n" + "="*50)
-        data_load_result = data_loading_stage()()
-        if data_load_result is None:
-            print("数据加载失败，程序终止")
-            return
+        train = pd.read_csv('/Users/qingguo/Documents/project/carPricePredict/data/train.csv')
+        test = pd.read_csv('/Users/qingguo/Documents/project/carPricePredict/data/testA.csv')
         
-        # 更新全局数据
-        global_data.update(data_load_result)
+        global_data['train_raw'] = train
+        global_data['test_raw'] = test
+        
+        print(f"数据加载成功 - 训练集: {train.shape}, 测试集: {test.shape}")
+        print(f"训练集列名: {list(train.columns)}")
+        print(f"测试集列名: {list(test.columns)}")
         
         # 2. 数据清洗阶段
         print("\n" + "="*50)
