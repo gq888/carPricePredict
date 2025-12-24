@@ -19,8 +19,16 @@ from typing import List, Dict, Optional, Tuple
 from datetime import datetime
 import joblib
 
+# 导入缓存工具
+import sys
+sys.path.append('/Users/qingguo/Documents/project/carPricePredict')
+from cache_util import load_cache, save_cache, check_dependencies
+
 # 忽略警告
 warnings.filterwarnings('ignore')
+
+# 全局数据存储
+global_data = {}
 
 class ComprehensiveFeatureEngineering:
     """
@@ -523,8 +531,8 @@ class ComprehensiveFeatureEngineering:
                 
                 # 创建交互特征
                 df_interactions[f'{col1}_x_{col2}'] = df[col1] * df[col2]
-                df_interactions[f'{col1}_+_{col2}'] = df[col1] + df[col2]
-                df_interactions[f'{col1}_-_{col2}'] = df[col1] - df[col2]
+                df_interactions[f'{col1}_plus_{col2}'] = df[col1] + df[col2]
+                df_interactions[f'{col1}_minus_{col2}'] = df[col1] - df[col2]
                 
                 # 避免除零
                 if df[col2].abs().min() > 0:
@@ -620,35 +628,80 @@ class ComprehensiveFeatureEngineering:
         
         return df_domain
     
-    def comprehensive_feature_selection(self, df: pd.DataFrame, target: pd.Series) -> pd.DataFrame:
+    def comprehensive_feature_selection(self, df: pd.DataFrame, target: pd.Series, random_state: int = 42) -> pd.DataFrame:
         """
-        全面特征选择
+        综合特征选择 - 使用独立闭包函数
+        
+        Args:
+            df: 输入数据框
+            target: 目标变量
+            random_state: 随机种子
+        
+        Returns:
+            特征选择后的数据框
         """
-        print("=== 特征选择阶段 ===")
+        print("\n=== 综合特征选择 ===")
         
-        # 1. 移除低方差特征
-        print("1. 移除低方差特征...")
-        df_selected = self._remove_low_variance_features(df)
+        # 设置全局数据
+        global_data['target'] = target
         
-        # 2. 基于统计检验的特征选择
-        print("2. 基于统计检验的特征选择...")
-        statistical_selected = self._statistical_based_selection(df_selected, target)
+        # 步骤1: 低方差特征移除
+        print("\n1. 低方差特征移除...")
+        global_data['df_after_feature_creation'] = df
         
-        # 3. 基于模型重要性的特征选择
-        print("3. 基于模型重要性的特征选择...")
-        model_selected = self._model_based_selection(df_selected[statistical_selected], target)
+        low_variance_func = low_variance_removal_stage()
+        low_variance_result = low_variance_func()
         
-        # 4. 递归特征消除
-        print("4. 递归特征消除...")
-        final_selected = self._recursive_feature_elimination(df_selected[model_selected], target)
+        if low_variance_result is None:
+            print("   低方差特征移除失败，跳过此步骤")
+            global_data['df_after_low_variance_removal'] = df
+        else:
+            global_data.update(low_variance_result)
         
-        # 保存最终选择的特征列表
-        self.fitted_transformers['selected_features'] = final_selected
+        # 步骤2: 统计检验特征选择
+        print("\n2. 统计检验特征选择...")
+        statistical_func = statistical_selection_stage()
+        statistical_result = statistical_func()
         
-        df_final = df_selected[final_selected]
+        if statistical_result is None:
+            print("   统计检验特征选择失败，跳过此步骤")
+            global_data['statistically_selected_features'] = global_data['df_after_low_variance_removal'].columns.tolist()
+        else:
+            global_data.update(statistical_result)
         
-        print(f"特征选择完成: {df.shape[1]} -> {df_final.shape[1]} 个特征")
-        return df_final
+        # 步骤3: 模型重要性特征选择
+        print("\n3. 模型重要性特征选择...")
+        model_based_func = model_based_selection_stage()
+        model_based_result = model_based_func()
+        
+        if model_based_result is None:
+            print("   模型重要性特征选择失败，跳过此步骤")
+            global_data['model_selected_features'] = global_data['statistically_selected_features']
+        else:
+            global_data.update(model_based_result)
+        
+        # 步骤4: 递归特征消除
+        print("\n4. 递归特征消除...")
+        rfe_func = recursive_feature_elimination_stage()
+        rfe_result = rfe_func()
+        
+        if rfe_result is None:
+            print("   递归特征消除失败，跳过此步骤")
+            global_data['final_selected_features'] = global_data['model_selected_features']
+        else:
+            global_data.update(rfe_result)
+        
+        # 步骤5: 最终特征选择
+        print("\n5. 最终特征选择...")
+        final_func = final_feature_selection_stage()
+        final_result = final_func()
+        
+        if final_result is None:
+            print("   最终特征选择失败，返回原始数据")
+            return global_data['df_after_low_variance_removal']
+        else:
+            global_data.update(final_result)
+            return global_data['df_after_feature_selection']
     
     def _remove_low_variance_features(self, df: pd.DataFrame, threshold: float = 0.01) -> pd.DataFrame:
         """移除低方差特征"""
@@ -718,29 +771,55 @@ class ComprehensiveFeatureEngineering:
     
     def _recursive_feature_elimination(self, df: pd.DataFrame, target: pd.Series) -> List[str]:
         """递归特征消除"""
+        df = global_data['df_after_low_variance_removal'].copy()
+        selected_features = global_data['model_selected_features']
+        target = global_data['target'].copy()
+        
+        # 获取模型重要性选择的特征数据
+        df_selected = df[selected_features]
+        
+        # 如果特征数太少，直接返回当前特征
+        if df_selected.shape[1] < 2:
+            print(f"   特征数太少 ({df_selected.shape[1]})，跳过递归特征消除")
+            result = {
+                'final_selected_features': selected_features,
+                'rfe_estimator': None
+            }
+            save_cache(cache_key, result, dependencies)
+            return result
+        
         # 编码分类变量
-        df_encoded = df.copy()
-        for col in df.columns:
-            if df[col].dtype == 'object':
+        df_encoded = df_selected.copy()
+        for col in df_selected.columns:
+            if df_selected[col].dtype == 'object':
                 le = LabelEncoder()
-                df_encoded[col] = le.fit_transform(df[col].astype(str))
+                df_encoded[col] = le.fit_transform(df_selected[col].astype(str))
         
         # 处理缺失值
         df_encoded = df_encoded.fillna(0)
         
         # 使用逻辑回归进行RFE
-        estimator = LogisticRegression(random_state=self.random_state, max_iter=1000)
+        estimator = LogisticRegression(random_state=42, max_iter=1000)
         
-        # 选择特征数量 (至少保留10个，最多保留50个)
-        n_features_to_select = min(50, max(10, df_encoded.shape[1] // 3))
+        # 选择特征数量 (至少保留2个，最多保留50个，或总数的1/3)
+        n_features_to_select = min(50, max(2, df_encoded.shape[1] // 3))
         
         rfe = RFE(estimator, n_features_to_select=n_features_to_select)
         rfe.fit(df_encoded, target)
         
-        selected_features = df_encoded.columns[rfe.support_].tolist()
+        final_selected_features = df_encoded.columns[rfe.support_].tolist()
         
-        print(f"   递归特征消除选择 {len(selected_features)} 个特征")
-        return selected_features
+        print(f"   递归特征消除选择 {len(final_selected_features)} 个特征")
+        
+        result = {
+            'final_selected_features': final_selected_features,
+            'rfe_estimator': rfe
+        }
+        
+        # 保存缓存
+        save_cache(cache_key, result, dependencies)
+        
+        return result
     
     def comprehensive_dimensionality_reduction(self, df: pd.DataFrame, 
                                              n_components: int = 50) -> pd.DataFrame:
@@ -961,9 +1040,10 @@ class ComprehensiveFeatureEngineering:
             for i in range(min(len(numeric_cols), 5)):  # 限制数量避免过多
                 for j in range(i+1, min(len(numeric_cols), 5)):
                     col1, col2 = numeric_cols[i], numeric_cols[j]
+                    # 创建交互特征和高阶多项式特征
                     df_created[f'{col1}_x_{col2}'] = df_created[col1] * df_created[col2]
-                    df_created[f'{col1}_+_{col2}'] = df_created[col1] + df_created[col2]
-                    df_created[f'{col1}_-_{col2}'] = df_created[col1] - df_created[col2]
+                    df_created[f'{col1}_plus_{col2}'] = df_created[col1] + df_created[col2]
+                    df_created[f'{col1}_minus_{col2}'] = df_created[col1] - df_created[col2]
                     if df_created[col2].abs().max() > 0:  # 避免除零
                         df_created[f'{col1}_/_${col2}'] = df_created[col1] / df_created[col2]
         
@@ -1139,6 +1219,295 @@ def test_comprehensive_feature_engineering():
     fe_system.save_transformers('/Users/qingguo/Documents/project/carPricePredict/comprehensive_fe_transformers.pkl')
     
     return X_transformed, y, fe_system
+
+
+# 独立的特征选择闭包函数
+def low_variance_removal_stage():
+    """低方差特征移除阶段 - 闭包函数"""
+    def remove_low_variance_features():
+        print("=== 低方差特征移除阶段 ===")
+        
+        # 检查依赖项
+        dependencies = {
+            'df_after_feature_creation': global_data.get('df_after_feature_creation')
+        }
+        
+        if not check_dependencies(dependencies):
+            return None
+        
+        # 检查缓存
+        cache_key = 'low_variance_removal'
+        cached_result = load_cache(cache_key, dependencies)
+        if cached_result is not None:
+            return cached_result
+        
+        df = global_data['df_after_feature_creation'].copy()
+        
+        # 计算每个特征的方差
+        variances = df.var(numeric_only=True)
+        
+        # 找到低方差特征
+        low_variance_cols = variances[variances < 0.01].index.tolist()
+        
+        # 保留方差较高的特征
+        high_variance_cols = [col for col in df.columns if col not in low_variance_cols]
+        
+        df_selected = df[high_variance_cols]
+        
+        print(f"   移除 {len(low_variance_cols)} 个低方差特征")
+        print(f"   剩余特征数: {df_selected.shape[1]}")
+        
+        result = {
+            'df_after_low_variance_removal': df_selected,
+            'removed_low_variance_features': low_variance_cols
+        }
+        
+        # 保存缓存
+        save_cache(cache_key, result, dependencies)
+        
+        return result
+    
+    return remove_low_variance_features
+
+def statistical_selection_stage():
+    """统计检验特征选择阶段 - 闭包函数"""
+    def statistical_based_selection():
+        print("=== 统计检验特征选择阶段 ===")
+        
+        # 检查依赖项
+        dependencies = {
+            'df_after_low_variance_removal': global_data.get('df_after_low_variance_removal'),
+            'target': global_data.get('target')
+        }
+        
+        if not check_dependencies(dependencies):
+            return None
+        
+        # 检查缓存
+        cache_key = 'statistical_selection'
+        cached_result = load_cache(cache_key, dependencies)
+        if cached_result is not None:
+            return cached_result
+        
+        df = global_data['df_after_low_variance_removal'].copy()
+        target = global_data['target'].copy()
+        
+        selected_features = []
+        
+        for col in df.columns:
+            try:
+                if df[col].dtype == 'object' or df[col].dtype.name == 'category':
+                    # 卡方检验用于分类变量
+                    contingency_table = pd.crosstab(df[col], target)
+                    chi2_stat, p_value, _, _ = stats.chi2_contingency(contingency_table)
+                    if p_value < 0.05:
+                        selected_features.append(col)
+                else:
+                    # F检验用于数值变量
+                    groups = [df[col][target == class_val] for class_val in target.unique()]
+                    f_stat, p_value = stats.f_oneway(*groups)
+                    if p_value < 0.05:
+                        selected_features.append(col)
+            except Exception as e:
+                print(f"   特征 {col} 统计检验失败: {e}")
+                continue
+        
+        print(f"   统计检验选择 {len(selected_features)} 个特征")
+        
+        result = {
+            'statistically_selected_features': selected_features
+        }
+        
+        # 保存缓存
+        save_cache(cache_key, result, dependencies)
+        
+        return result
+    
+    return statistical_based_selection
+
+def model_based_selection_stage():
+    """模型重要性特征选择阶段 - 闭包函数"""
+    def model_based_selection():
+        print("=== 模型重要性特征选择阶段 ===")
+        
+        # 检查依赖项
+        dependencies = {
+            'df_after_low_variance_removal': global_data.get('df_after_low_variance_removal'),
+            'statistically_selected_features': global_data.get('statistically_selected_features'),
+            'target': global_data.get('target')
+        }
+        
+        if not check_dependencies(dependencies):
+            return None
+        
+        # 检查缓存
+        cache_key = 'model_based_selection'
+        cached_result = load_cache(cache_key, dependencies)
+        if cached_result is not None:
+            return cached_result
+        
+        df = global_data['df_after_low_variance_removal'].copy()
+        selected_features = global_data['statistically_selected_features']
+        target = global_data['target'].copy()
+        
+        # 获取统计检验选择的特征数据
+        df_selected = df[selected_features]
+        
+        # 编码分类变量
+        df_encoded = df_selected.copy()
+        for col in df_selected.columns:
+            if df_selected[col].dtype == 'object':
+                le = LabelEncoder()
+                df_encoded[col] = le.fit_transform(df_selected[col].astype(str))
+        
+        # 处理缺失值
+        df_encoded = df_encoded.fillna(0)
+        
+        # 使用随机森林评估特征重要性
+        rf = RandomForestClassifier(n_estimators=100, random_state=42)
+        rf.fit(df_encoded, target)
+        
+        # 获取特征重要性
+        feature_importance = dict(zip(df_encoded.columns, rf.feature_importances_))
+        
+        # 选择重要性前50%的特征
+        sorted_features = sorted(feature_importance.items(), key=lambda x: x[1], reverse=True)
+        n_select = max(1, len(sorted_features) // 2)
+        selected_features_final = [feature for feature, _ in sorted_features[:n_select]]
+        
+        print(f"   模型重要性选择 {len(selected_features_final)} 个特征")
+        
+        result = {
+            'model_selected_features': selected_features_final,
+            'feature_importance_scores': feature_importance
+        }
+        
+        # 保存缓存
+        save_cache(cache_key, result, dependencies)
+        
+        return result
+    
+    return model_based_selection
+
+def recursive_feature_elimination_stage():
+    """递归特征消除阶段 - 闭包函数"""
+    def recursive_feature_elimination():
+        print("=== 递归特征消除阶段 ===")
+        
+        # 检查依赖项
+        dependencies = {
+            'df_after_low_variance_removal': global_data.get('df_after_low_variance_removal'),
+            'model_selected_features': global_data.get('model_selected_features'),
+            'target': global_data.get('target')
+        }
+        
+        if not check_dependencies(dependencies):
+            return None
+        
+        # 检查缓存
+        cache_key = 'recursive_feature_elimination'
+        cached_result = load_cache(cache_key, dependencies)
+        if cached_result is not None:
+            return cached_result
+        
+        df = global_data['df_after_low_variance_removal'].copy()
+        selected_features = global_data['model_selected_features']
+        target = global_data['target'].copy()
+        
+        # 获取模型重要性选择的特征数据
+        df_selected = df[selected_features]
+        
+        # 如果特征数太少，直接返回当前特征
+        if df_selected.shape[1] < 2:
+            print(f"   特征数太少 ({df_selected.shape[1]})，跳过递归特征消除")
+            result = {
+                'final_selected_features': selected_features,
+                'rfe_estimator': None
+            }
+            save_cache(cache_key, result, dependencies)
+            return result
+        
+        # 编码分类变量
+        df_encoded = df_selected.copy()
+        for col in df_selected.columns:
+            if df_selected[col].dtype == 'object':
+                le = LabelEncoder()
+                df_encoded[col] = le.fit_transform(df_selected[col].astype(str))
+        
+        # 处理缺失值
+        df_encoded = df_encoded.fillna(0)
+        
+        # 使用逻辑回归进行RFE
+        estimator = LogisticRegression(random_state=42, max_iter=1000)
+        
+        # 选择特征数量 (至少保留2个，最多保留50个)
+        n_features_to_select = min(50, max(2, df_encoded.shape[1] // 3))
+        
+        rfe = RFE(estimator, n_features_to_select=n_features_to_select)
+        rfe.fit(df_encoded, target)
+        
+        final_selected_features = df_encoded.columns[rfe.support_].tolist()
+        
+        print(f"   递归特征消除选择 {len(final_selected_features)} 个特征")
+        
+        result = {
+            'final_selected_features': final_selected_features,
+            'rfe_estimator': rfe
+        }
+        
+        # 保存缓存
+        save_cache(cache_key, result, dependencies)
+        
+        return result
+    
+    return recursive_feature_elimination
+
+def final_feature_selection_stage():
+    """最终特征选择阶段 - 闭包函数"""
+    def final_feature_selection():
+        print("=== 最终特征选择阶段 ===")
+        
+        # 检查依赖项
+        dependencies = {
+            'df_after_low_variance_removal': global_data.get('df_after_low_variance_removal'),
+            'final_selected_features': global_data.get('final_selected_features')
+        }
+        
+        if not check_dependencies(dependencies):
+            return None
+        
+        # 检查缓存
+        cache_key = 'final_feature_selection'
+        cached_result = load_cache(cache_key, dependencies)
+        if cached_result is not None:
+            return cached_result
+        
+        df = global_data['df_after_low_variance_removal'].copy()
+        final_features = global_data['final_selected_features']
+        
+        # 应用最终选择的特征
+        df_final = df[final_features]
+        
+        print(f"特征选择完成: {df.shape[1]} -> {df_final.shape[1]} 个特征")
+        
+        result = {
+            'df_after_feature_selection': df_final
+        }
+        
+        # 保存缓存
+        save_cache(cache_key, result, dependencies)
+        
+        return result
+    
+    return final_feature_selection
+
+
+def check_dependencies(dependencies):
+    """检查依赖关系"""
+    for dependency in dependencies.values():
+        if dependency is None:
+            return False
+    return True
 
 
 if __name__ == "__main__":
