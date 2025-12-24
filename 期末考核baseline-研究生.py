@@ -50,91 +50,6 @@ global_data = {}
 
 from cache_util import load_cache, save_cache, check_dependencies
 
-def data_cleaning_stage():
-    """数据清洗阶段 - 闭包函数"""
-    def clean_data():
-        print("=== 数据清洗阶段 ===")
-        
-        # 检查依赖项
-        dependencies = {
-            'train_raw': global_data.get('train_raw'),
-            'test_raw': global_data.get('test_raw')
-        }
-        
-        if not check_dependencies(dependencies):
-            return None
-        
-        # 检查缓存
-        cache_key = 'data_cleaning'
-        cached_result = load_cache(cache_key, dependencies)
-        if cached_result is not None:
-            return cached_result
-        
-        # 获取原始数据
-        train = global_data['train_raw'].copy()
-        test = global_data['test_raw'].copy()
-        
-        print(f"原始数据形状 - 训练集: {train.shape}, 测试集: {test.shape}")
-        
-        # 1. 处理缺失值
-        print("1. 处理缺失值...")
-        # 数值列用中位数填充
-        numeric_cols = train.select_dtypes(include=[np.number]).columns
-        for col in numeric_cols:
-            if col in train.columns:
-                train[col].fillna(train[col].median(), inplace=True)
-                if col in test.columns:
-                    test[col].fillna(train[col].median(), inplace=True)
-        
-        # 分类列用众数填充
-        categorical_cols = train.select_dtypes(include=['object']).columns
-        for col in categorical_cols:
-            if col in train.columns:
-                mode_val = train[col].mode()[0] if not train[col].mode().empty else 'Unknown'
-                train[col].fillna(mode_val, inplace=True)
-                if col in test.columns:
-                    test[col].fillna(mode_val, inplace=True)
-        
-        # 2. 处理异常值
-        print("2. 处理异常值...")
-        # 移除明显异常的行
-        train = train[train['贷款总额'] > 0]
-        test = test[test['贷款总额'] > 0]
-        
-        # 3. 数据类型转换
-        print("3. 数据类型转换...")
-        # 将日期字符串转换为数值特征
-        date_cols = ['最早信用账户开通月']
-        for col in date_cols:
-            if col in train.columns:
-                # 简化的日期处理，转换为年份差值
-                train[col] = pd.to_datetime(train[col], errors='coerce')
-                test[col] = pd.to_datetime(test[col], errors='coerce')
-                
-                # 计算距离现在的年份差
-                reference_date = pd.to_datetime('2020-01-01')
-                train[f'{col}_years'] = (reference_date - train[col]).dt.days / 365.25
-                test[f'{col}_years'] = (reference_date - test[col]).dt.days / 365.25
-                
-                # 填充缺失值
-                train[f'{col}_years'].fillna(train[f'{col}_years'].median(), inplace=True)
-                test[f'{col}_years'].fillna(train[f'{col}_years'].median(), inplace=True)
-                
-                # 删除原始日期列
-                train.drop(columns=[col], inplace=True)
-                test.drop(columns=[col], inplace=True)
-        
-        print(f"清洗后数据形状 - 训练集: {train.shape}, 测试集: {test.shape}")
-        
-        result = {'train_clean': train, 'test_clean': test}
-        
-        # 保存缓存
-        save_cache(cache_key, result, dependencies)
-        
-        return result
-    
-    return clean_data
-
 def eda_stage():
     """探索性数据分析阶段 - 闭包函数"""
     def perform_eda():
@@ -142,8 +57,8 @@ def eda_stage():
         
         # 检查依赖项
         dependencies = {
-            'train_clean': global_data.get('train_clean'),
-            'test_clean': global_data.get('test_clean')
+            'train_raw': global_data.get('train_raw'),
+            'test_raw': global_data.get('test_raw')
         }
         
         if not check_dependencies(dependencies):
@@ -156,8 +71,8 @@ def eda_stage():
             return cached_result
         
         # 获取清洗后的数据
-        train = global_data['train_clean'].copy()
-        test = global_data['test_clean'].copy()
+        train = global_data['train_raw'].copy()
+        test = global_data['test_raw'].copy()
         
         print(f"EDA分析 - 训练集: {train.shape}, 测试集: {test.shape}")
         
@@ -245,8 +160,8 @@ def feature_engineering_stage():
         
         # 检查依赖项
         dependencies = {
-            'train_clean': global_data.get('train_clean'),
-            'test_clean': global_data.get('test_clean')
+            'train_raw': global_data.get('train_raw'),
+            'test_raw': global_data.get('test_raw')
         }
         
         if not check_dependencies(dependencies):
@@ -259,8 +174,8 @@ def feature_engineering_stage():
             return cached_result
         
         # 获取清洗后的数据
-        train = global_data['train_clean'].copy()
-        test = global_data['test_clean'].copy()
+        train = global_data['train_raw'].copy()
+        test = global_data['test_raw'].copy()
         
         print(f"特征工程 - 训练集: {train.shape}, 测试集: {test.shape}")
         
@@ -886,17 +801,17 @@ def submission_stage():
         # 检查依赖项
         dependencies = {
             'test_predictions': global_data.get('test_predictions'),
-            'test_clean': global_data.get('test_clean')
+            'test_raw': global_data.get('test_raw')
         }
         
         if not check_dependencies(dependencies):
             return None
         
         test_predictions = global_data['test_predictions']
-        test_clean = global_data['test_clean']
+        test_raw = global_data['test_raw']
         
         # 使用原始测试集的贷款ID字段
-        loan_ids = test_clean['贷款ID']
+        loan_ids = test_raw['贷款ID']
         
         # 创建提交文件
         submission = pd.DataFrame({
@@ -935,15 +850,15 @@ def main():
         print(f"训练集列名: {list(train.columns)}")
         print(f"测试集列名: {list(test.columns)}")
         
-        # 2. 数据清洗阶段
-        print("\n" + "="*50)
-        data_clean_result = data_cleaning_stage()()
-        if data_clean_result is None:
-            print("数据清洗失败，程序终止")
-            return
+        # # 2. 数据清洗阶段
+        # print("\n" + "="*50)
+        # data_clean_result = data_cleaning_stage()()
+        # if data_clean_result is None:
+        #     print("数据清洗失败，程序终止")
+        #     return
         
-        # 更新全局数据
-        global_data.update(data_clean_result)
+        # # 更新全局数据
+        # global_data.update(data_clean_result)
         
         # 3. 探索性数据分析阶段
         print("\n" + "="*50)
