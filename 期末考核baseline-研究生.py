@@ -808,8 +808,8 @@ def submission_stage():
         
         # 创建提交文件
         submission = pd.DataFrame({
-            'id': loan_ids,
-            '是否违约': test_predictions
+            'ID': loan_ids,
+            'label': test_predictions
         })
         
         # 保存提交文件
