@@ -379,10 +379,10 @@ def basic_feature_engineering(train, test):
         'label_encoders': label_encoders
     }
 
-def modeling_stage():
-    """建模阶段 - 闭包函数"""
-    def build_models():
-        print("=== 建模阶段 ===")
+def logistic_regression_stage():
+    """Logistic Regression模型阶段 - 闭包函数"""
+    def train_logistic_regression():
+        print("=== Logistic Regression模型阶段 ===")
         
         # 检查依赖项
         dependencies = {
@@ -394,7 +394,7 @@ def modeling_stage():
             return None
         
         # 检查缓存
-        cache_key = 'modeling'
+        cache_key = 'logistic_regression_model'
         cached_result = load_cache(cache_key, dependencies)
         if cached_result is not None:
             return cached_result
@@ -403,28 +403,17 @@ def modeling_stage():
         train_fe = global_data['train_fe'].copy()
         test_fe = global_data['test_fe'].copy()
         
-        print(f"建模 - 训练集: {train_fe.shape}, 测试集: {test_fe.shape}")
+        print(f"Logistic Regression - 训练集: {train_fe.shape}, 测试集: {test_fe.shape}")
         
-        # 1. 准备数据
-        print("1. 数据准备...")
-        # 分离特征和目标
+        # 准备数据
         X = train_fe.drop(columns=['是否违约', '贷款ID'])
         y = train_fe['是否违约']
-        
-        # 测试集特征（无标签）
         X_test = test_fe.drop(columns=['贷款ID'])
         
         print(f"特征维度: {X.shape}, 标签维度: {y.shape}")
         
-        # 2. 模型训练与交叉验证
-        print("2. 模型训练与交叉验证...")
-        
-        # 定义模型和超参数空间
-        models = {}
-        cv_scores = {}
-        
         # Logistic Regression with GridSearchCV
-        print("2.1 Logistic Regression with Cross-Validation...")
+        print("Logistic Regression with Cross-Validation...")
         lr_param_grid = {
             'C': [0.1, 1, 10],
             'penalty': ['l1', 'l2'],
@@ -440,14 +429,80 @@ def modeling_stage():
         )
         
         lr_grid.fit(X, y)
-        models['LogisticRegression'] = lr_grid.best_estimator_
-        cv_scores['LogisticRegression'] = lr_grid.best_score_
         
         print(f"Logistic Regression - Best AUC: {lr_grid.best_score_:.4f}")
         print(f"Best params: {lr_grid.best_params_}")
         
+        # 特征重要性分析
+        print("特征重要性分析...")
+        feature_importance = pd.DataFrame({
+            'feature': X.columns,
+            'importance': np.abs(lr_grid.best_estimator_.coef_[0])
+        }).sort_values('importance', ascending=False)
+        
+        print(f"重要特征 (前10个):")
+        print(feature_importance.head(10))
+        
+        # 绘制特征重要性图
+        plt.figure(figsize=(10, 8))
+        top_features = feature_importance.head(15)
+        plt.barh(top_features['feature'], top_features['importance'])
+        plt.xlabel('特征重要性')
+        plt.title('Logistic Regression 特征重要性')
+        plt.tight_layout()
+        importance_path = '/Users/qingguo/Documents/project/carPricePredict/feature_importance_LogisticRegression.png'
+        plt.savefig(importance_path, dpi=300, bbox_inches='tight')
+        plt.show()
+        
+        result = {
+            'lr_model': lr_grid.best_estimator_,
+            'lr_cv_score': lr_grid.best_score_,
+            'lr_best_params': lr_grid.best_params_,
+            'lr_feature_importance': feature_importance
+        }
+        
+        # 保存缓存
+        save_cache(cache_key, result, dependencies)
+        
+        return result
+    
+    return train_logistic_regression
+
+def random_forest_stage():
+    """Random Forest模型阶段 - 闭包函数"""
+    def train_random_forest():
+        print("=== Random Forest模型阶段 ===")
+        
+        # 检查依赖项
+        dependencies = {
+            'train_fe': global_data.get('train_fe'),
+            'test_fe': global_data.get('test_fe')
+        }
+        
+        if not check_dependencies(dependencies):
+            return None
+        
+        # 检查缓存
+        cache_key = 'random_forest_model'
+        cached_result = load_cache(cache_key, dependencies)
+        if cached_result is not None:
+            return cached_result
+        
+        # 获取特征工程后的数据
+        train_fe = global_data['train_fe'].copy()
+        test_fe = global_data['test_fe'].copy()
+        
+        print(f"Random Forest - 训练集: {train_fe.shape}, 测试集: {test_fe.shape}")
+        
+        # 准备数据
+        X = train_fe.drop(columns=['是否违约', '贷款ID'])
+        y = train_fe['是否违约']
+        X_test = test_fe.drop(columns=['贷款ID'])
+        
+        print(f"特征维度: {X.shape}, 标签维度: {y.shape}")
+        
         # Random Forest with GridSearchCV
-        print("2.2 Random Forest with Cross-Validation...")
+        print("Random Forest with Cross-Validation...")
         rf_param_grid = {
             'n_estimators': [50, 100, 200],
             'max_depth': [5, 10, 15, None],
@@ -463,23 +518,88 @@ def modeling_stage():
         )
         
         rf_grid.fit(X, y)
-        models['RandomForest'] = rf_grid.best_estimator_
-        cv_scores['RandomForest'] = rf_grid.best_score_
         
         print(f"Random Forest - Best AUC: {rf_grid.best_score_:.4f}")
         print(f"Best params: {rf_grid.best_params_}")
         
-        # 3. 模型集成 - 堆叠法 (Stacking)
-        print("2.3 模型集成 - Stacking...")
+        # 特征重要性分析
+        print("特征重要性分析...")
+        feature_importance = pd.DataFrame({
+            'feature': X.columns,
+            'importance': rf_grid.best_estimator_.feature_importances_
+        }).sort_values('importance', ascending=False)
+        
+        print(f"重要特征 (前10个):")
+        print(feature_importance.head(10))
+        
+        # 绘制特征重要性图
+        plt.figure(figsize=(10, 8))
+        top_features = feature_importance.head(15)
+        plt.barh(top_features['feature'], top_features['importance'])
+        plt.xlabel('特征重要性')
+        plt.title('Random Forest 特征重要性')
+        plt.tight_layout()
+        importance_path = '/Users/qingguo/Documents/project/carPricePredict/feature_importance_RandomForest.png'
+        plt.savefig(importance_path, dpi=300, bbox_inches='tight')
+        plt.show()
+        
+        result = {
+            'rf_model': rf_grid.best_estimator_,
+            'rf_cv_score': rf_grid.best_score_,
+            'rf_best_params': rf_grid.best_params_,
+            'rf_feature_importance': feature_importance
+        }
+        
+        # 保存缓存
+        save_cache(cache_key, result, dependencies)
+        
+        return result
+    
+    return train_random_forest
+
+def stacking_stage():
+    """Stacking集成模型阶段 - 闭包函数"""
+    def train_stacking():
+        print("=== Stacking集成模型阶段 ===")
+        
+        # 检查依赖项 - 需要基础模型
+        dependencies = {
+            'train_fe': global_data.get('train_fe'),
+            'test_fe': global_data.get('test_fe'),
+            'lr_model': global_data.get('lr_model'),
+            'rf_model': global_data.get('rf_model')
+        }
+        
+        if not check_dependencies(dependencies):
+            return None
+        
+        # 检查缓存
+        cache_key = 'stacking_model'
+        cached_result = load_cache(cache_key, dependencies)
+        if cached_result is not None:
+            return cached_result
+        
+        # 获取特征工程后的数据
+        train_fe = global_data['train_fe'].copy()
+        test_fe = global_data['test_fe'].copy()
+        
+        print(f"Stacking - 训练集: {train_fe.shape}, 测试集: {test_fe.shape}")
+        
+        # 准备数据
+        X = train_fe.drop(columns=['是否违约', '贷款ID'])
+        y = train_fe['是否违约']
+        
+        print(f"特征维度: {X.shape}, 标签维度: {y.shape}")
+        
+        # 模型集成 - 堆叠法 (Stacking)
+        print("模型集成 - Stacking...")
         from sklearn.ensemble import StackingClassifier
-        from sklearn.linear_model import LogisticRegression
-        from sklearn.svm import SVC
         from sklearn.ensemble import GradientBoostingClassifier
         
         # 定义基础模型
         base_models = [
-            ('lr', LogisticRegression(C=1, penalty='l2', random_state=42)),
-            ('rf', RandomForestClassifier(n_estimators=100, max_depth=10, random_state=42)),
+            ('lr', global_data['lr_model']),
+            ('rf', global_data['rf_model']),
             ('gb', GradientBoostingClassifier(n_estimators=100, learning_rate=0.1, random_state=42))
         ]
         
@@ -500,21 +620,65 @@ def modeling_stage():
         # 评估堆叠模型
         stacking_cv_score = cross_val_score(stacking_model, X, y, cv=3, scoring='roc_auc').mean()
         
-        models['Stacking'] = stacking_model
-        cv_scores['Stacking'] = stacking_cv_score
-        
         print(f"Stacking - AUC: {stacking_cv_score:.4f}")
         
+        result = {
+            'stacking_model': stacking_model,
+            'stacking_cv_score': stacking_cv_score
+        }
+        
+        # 保存缓存
+        save_cache(cache_key, result, dependencies)
+        
+        return result
+    
+    return train_stacking
+
+def voting_stage():
+    """Voting集成模型阶段 - 闭包函数"""
+    def train_voting():
+        print("=== Voting集成模型阶段 ===")
+        
+        # 检查依赖项 - 需要基础模型和堆叠模型
+        dependencies = {
+            'train_fe': global_data.get('train_fe'),
+            'test_fe': global_data.get('test_fe'),
+            'lr_model': global_data.get('lr_model'),
+            'rf_model': global_data.get('rf_model'),
+            'stacking_model': global_data.get('stacking_model')
+        }
+        
+        if not check_dependencies(dependencies):
+            return None
+        
+        # 检查缓存
+        cache_key = 'voting_model'
+        cached_result = load_cache(cache_key, dependencies)
+        if cached_result is not None:
+            return cached_result
+        
+        # 获取特征工程后的数据
+        train_fe = global_data['train_fe'].copy()
+        test_fe = global_data['test_fe'].copy()
+        
+        print(f"Voting - 训练集: {train_fe.shape}, 测试集: {test_fe.shape}")
+        
+        # 准备数据
+        X = train_fe.drop(columns=['是否违约', '贷款ID'])
+        y = train_fe['是否违约']
+        
+        print(f"特征维度: {X.shape}, 标签维度: {y.shape}")
+        
         # 模型投票集成
-        print("2.4 模型投票集成...")
+        print("模型投票集成...")
         from sklearn.ensemble import VotingClassifier
         
         # 创建投票分类器
         voting_model = VotingClassifier(
             estimators=[
-                ('lr', lr_grid.best_estimator_),
-                ('rf', rf_grid.best_estimator_),
-                ('stacking', stacking_model)
+                ('lr', global_data['lr_model']),
+                ('rf', global_data['rf_model']),
+                ('stacking', global_data['stacking_model'])
             ],
             voting='soft'  # 使用软投票（基于概率）
         )
@@ -525,23 +689,59 @@ def modeling_stage():
         # 评估投票模型
         voting_cv_score = cross_val_score(voting_model, X, y, cv=3, scoring='roc_auc').mean()
         
-        models['Voting'] = voting_model
-        cv_scores['Voting'] = voting_cv_score
-        
         print(f"Voting - AUC: {voting_cv_score:.4f}")
         
-        # 3. 选择最佳模型
-        print("3. 选择最佳模型...")
+        result = {
+            'voting_model': voting_model,
+            'voting_cv_score': voting_cv_score
+        }
+        
+        # 保存缓存
+        save_cache(cache_key, result, dependencies)
+        
+        return result
+    
+    return train_voting
+
+def model_comparison_stage():
+    """模型比较和选择阶段 - 闭包函数"""
+    def compare_models():
+        print("=== 模型比较和选择阶段 ===")
+        
+        # 检查依赖项 - 需要所有模型
+        dependencies = {
+            'lr_cv_score': global_data.get('lr_cv_score'),
+            'rf_cv_score': global_data.get('rf_cv_score'),
+            'stacking_cv_score': global_data.get('stacking_cv_score'),
+            'voting_cv_score': global_data.get('voting_cv_score')
+        }
+        
+        if not check_dependencies(dependencies):
+            return None
+        
+        # 检查缓存
+        cache_key = 'model_comparison'
+        cached_result = load_cache(cache_key, dependencies)
+        if cached_result is not None:
+            return cached_result
+        
+        # 收集所有模型的性能
+        cv_scores = {
+            'LogisticRegression': global_data['lr_cv_score'],
+            'RandomForest': global_data['rf_cv_score'],
+            'Stacking': global_data['stacking_cv_score'],
+            'Voting': global_data['voting_cv_score']
+        }
+        
+        # 选择最佳模型
         best_model_name = max(cv_scores, key=cv_scores.get)
-        best_model = models[best_model_name]
         
         print(f"最佳模型: {best_model_name} (AUC: {cv_scores[best_model_name]:.4f})")
         print("\n所有模型性能:")
         for model_name, score in sorted(cv_scores.items(), key=lambda x: x[1], reverse=True):
             print(f"  {model_name}: {score:.4f}")
         
-        # 4. 模型性能对比
-        print("\n4. 模型性能对比...")
+        # 模型性能对比
         performance_df = pd.DataFrame({
             'Model': list(cv_scores.keys()),
             'CV_AUC': list(cv_scores.values())
@@ -571,106 +771,79 @@ def modeling_stage():
         plt.savefig('/Users/qingguo/Documents/project/carPricePredict/model_performance_comparison.png', dpi=300, bbox_inches='tight')
         plt.show()
         
-        # 5. 特征重要性分析（仅对单一模型）
-        print("\n5. 特征重要性分析...")
+        result = {
+            'best_model_name': best_model_name,
+            'cv_scores': cv_scores,
+            'performance_df': performance_df
+        }
         
-        # 获取最佳模型的特征重要性
-        if hasattr(best_model, 'feature_importances_'):
-            # 树模型特征重要性
-            feature_importance = pd.DataFrame({
-                'feature': X.columns,
-                'importance': best_model.feature_importances_
-            }).sort_values('importance', ascending=False)
-            
-            print(f"\n{best_model_name} 重要特征 (前10个):")
-            print(feature_importance.head(10))
-            
-            # 绘制特征重要性图
-            plt.figure(figsize=(10, 8))
-            top_features = feature_importance.head(15)
-            plt.barh(top_features['feature'], top_features['importance'])
-            plt.xlabel('特征重要性')
-            plt.title(f'{best_model_name} 特征重要性')
-            plt.tight_layout()
-            importance_path = f'/Users/qingguo/Documents/project/carPricePredict/feature_importance_{best_model_name}.png'
-            plt.savefig(importance_path, dpi=300, bbox_inches='tight')
-            plt.show()
-            
-        elif hasattr(best_model, 'coef_'):
-            # 线性模型特征重要性
-            feature_importance = pd.DataFrame({
-                'feature': X.columns,
-                'importance': np.abs(best_model.coef_[0])
-            }).sort_values('importance', ascending=False)
-            
-            print(f"\n{best_model_name} 重要特征 (前10个):")
-            print(feature_importance.head(10))
-            
-            # 绘制特征重要性图
-            plt.figure(figsize=(10, 8))
-            top_features = feature_importance.head(15)
-            plt.barh(top_features['feature'], top_features['importance'])
-            plt.xlabel('特征重要性')
-            plt.title(f'{best_model_name} 特征重要性')
-            plt.tight_layout()
-            importance_path = f'/Users/qingguo/Documents/project/carPricePredict/feature_importance_{best_model_name}.png'
-            plt.savefig(importance_path, dpi=300, bbox_inches='tight')
-            plt.show()
+        # 保存缓存
+        save_cache(cache_key, result, dependencies)
         
-        # 6. 预测生成
-        print("6. 预测生成...")
+        return result
+    
+    return compare_models
+
+def final_prediction_stage():
+    """最终预测阶段 - 闭包函数"""
+    def generate_final_predictions():
+        print("=== 最终预测阶段 ===")
         
-        # 使用最佳模型进行预测
-        test_predictions = best_model.predict_proba(X_test)[:, 1]
+        # 检查依赖项
+        dependencies = {
+            'best_model_name': global_data.get('best_model_name'),
+            'train_fe': global_data.get('train_fe'),
+            'test_fe': global_data.get('test_fe'),
+            'lr_model': global_data.get('lr_model'),
+            'rf_model': global_data.get('rf_model'),
+            'stacking_model': global_data.get('stacking_model'),
+            'voting_model': global_data.get('voting_model')
+        }
         
-        # 创建提交文件
-        submission = pd.DataFrame({
-            '贷款ID': test_df['贷款ID'],
-            '违约概率': test_predictions
-        })
+        if not check_dependencies(dependencies):
+            return None
         
-        # 保存提交文件
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        submission_filename = f"{student_id}submission_{timestamp}.csv"
-        submission.to_csv(submission_filename, index=False)
+        # 检查缓存
+        cache_key = 'final_predictions'
+        cached_result = load_cache(cache_key, dependencies)
+        if cached_result is not None:
+            return cached_result
         
-        print(f"\n提交文件已保存: {submission_filename}")
-        print(f"预测结果分布:")
-        print(f"  违约概率 < 0.5: {(test_predictions < 0.5).sum()}")
-        print(f"  违约概率 >= 0.5: {(test_predictions >= 0.5).sum()}")
+        # 获取特征工程后的数据
+        train_fe = global_data['train_fe'].copy()
+        test_fe = global_data['test_fe'].copy()
         
-        # 7. 结果总结
-        print("\n7. 结果总结:")
-        print(f"  训练样本数: {len(X)}")
-        print(f"  特征数: {X.shape[1]}")
-        print(f"  模型数: {len(models)}")
-        print(f"  最佳模型: {best_model_name}")
-        print(f"  最佳AUC: {cv_scores[best_model_name]:.4f}")
-        print(f"  测试预测数: {len(test_predictions)}")
+        # 准备数据
+        X = train_fe.drop(columns=['是否违约', '贷款ID'])
+        y = train_fe['是否违约']
+        X_test = test_fe.drop(columns=['贷款ID'])
         
-        print(f"\n预测概率分布:")
+        print(f"特征维度: {X.shape}, 标签维度: {y.shape}")
+        
+        # 根据最佳模型选择进行预测
+        best_model_name = global_data['best_model_name']
+        
+        if best_model_name == 'LogisticRegression':
+            best_model = global_data['lr_model']
+        elif best_model_name == 'RandomForest':
+            best_model = global_data['rf_model']
+        elif best_model_name == 'Stacking':
+            best_model = global_data['stacking_model']
+        else:  # Voting
+            best_model = global_data['voting_model']
+        
+        print(f"使用最佳模型: {best_model_name}")
+        
+        # 生成预测
+        test_predictions = best_model.predict(X_test)
+        test_probabilities = best_model.predict_proba(X_test)[:, 1]
+        
+        print(f"预测完成，预测数量: {len(test_predictions)}")
+        print(f"预测概率分布:")
         print(f"预测概率均值: {test_probabilities.mean():.4f}")
         print(f"预测概率标准差: {test_probabilities.std():.4f}")
         print(f"预测概率最小值: {test_probabilities.min():.4f}")
         print(f"预测概率最大值: {test_probabilities.max():.4f}")
-        
-        # 创建提交文件
-        submission = pd.DataFrame({
-            '贷款ID': test_df['贷款ID'],
-            '违约概率': test_probabilities
-        })
-        
-        # 保存提交文件
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        submission_filename = f"{student_id}submission_{timestamp}.csv"
-        submission.to_csv(submission_filename, index=False)
-        
-        print(f"\n提交文件已保存: {submission_filename}")
-        print(f"提交文件形状: {submission.shape}")
-        
-        print(f"预测结果分布:")
-        print(f"违约预测数量: {sum(test_predictions)}")
-        print(f"违约预测比例: {sum(test_predictions) / len(test_predictions) * 100:.2f}%")
         
         # 绘制预测概率分布图
         plt.figure(figsize=(12, 5))
@@ -693,16 +866,9 @@ def modeling_stage():
         plt.show()
         
         result = {
-            'train_features': X,
-            'test_features': X_test,
-            'train_target': y,
-            'models': models,
-            'best_model': best_model,
-            'best_model_name': best_model_name,
             'test_predictions': test_predictions,
             'test_probabilities': test_probabilities,
-            'cv_scores': cv_scores,
-            'performance_df': performance_df
+            'best_model': best_model
         }
         
         # 保存缓存
@@ -710,7 +876,7 @@ def modeling_stage():
         
         return result
     
-    return build_models
+    return generate_final_predictions
 
 def submission_stage():
     """生成提交文件阶段 - 闭包函数"""
@@ -753,81 +919,131 @@ def submission_stage():
     return generate_submission
 
 def main():
-    """主执行函数"""
-    print("开始执行增强版汽车价格预测基线...")
+    """主函数 - 执行完整的机器学习流程"""
+    print("=== 贷款违约预测项目 ===")
+    print(f"学生ID: {student_id}")
+    print(f"开始时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     
-    # 阶段1: 数据加载
-    print("\n=== 阶段0: 数据加载 ===")
     try:
-        train = pd.read_csv('/Users/qingguo/Documents/project/carPricePredict/data/train.csv')
-        test = pd.read_csv('/Users/qingguo/Documents/project/carPricePredict/data/testA.csv')
+        # 1. 数据加载阶段
+        print("\n" + "="*50)
+        data_load_result = data_loading_stage()()
+        if data_load_result is None:
+            print("数据加载失败，程序终止")
+            return
         
-        global_data['train_raw'] = train
-        global_data['test_raw'] = test
+        # 更新全局数据
+        global_data.update(data_load_result)
         
-        print(f"数据加载成功 - 训练集: {train.shape}, 测试集: {test.shape}")
-        print(f"训练集列名: {list(train.columns)}")
-        print(f"测试集列名: {list(test.columns)}")
+        # 2. 数据清洗阶段
+        print("\n" + "="*50)
+        data_clean_result = data_cleaning_stage()()
+        if data_clean_result is None:
+            print("数据清洗失败，程序终止")
+            return
+        
+        # 更新全局数据
+        global_data.update(data_clean_result)
+        
+        # 3. 探索性数据分析阶段
+        print("\n" + "="*50)
+        eda_result = eda_stage()()
+        if eda_result is None:
+            print("EDA失败，程序终止")
+            return
+        
+        # 更新全局数据
+        global_data.update(eda_result)
+        
+        # 4. 特征工程阶段
+        print("\n" + "="*50)
+        feature_engineering_result = feature_engineering_stage()()
+        if feature_engineering_result is None:
+            print("特征工程失败，程序终止")
+            return
+        
+        # 更新全局数据
+        global_data.update(feature_engineering_result)
+        
+        # 5. 建模阶段 - 使用独立的模型闭包函数
+        print("\n" + "="*50)
+        
+        # 5.1 Logistic Regression模型
+        print("\n" + "-"*30)
+        lr_result = logistic_regression_stage()()
+        if lr_result is None:
+            print("Logistic Regression模型训练失败")
+            return
+        global_data.update(lr_result)
+        
+        # 5.2 Random Forest模型
+        print("\n" + "-"*30)
+        rf_result = random_forest_stage()()
+        if rf_result is None:
+            print("Random Forest模型训练失败")
+            return
+        global_data.update(rf_result)
+        
+        # 5.3 Stacking集成模型
+        print("\n" + "-"*30)
+        stacking_result = stacking_stage()()
+        if stacking_result is None:
+            print("Stacking集成模型训练失败")
+            return
+        global_data.update(stacking_result)
+        
+        # 5.4 Voting集成模型
+        print("\n" + "-"*30)
+        voting_result = voting_stage()()
+        if voting_result is None:
+            print("Voting集成模型训练失败")
+            return
+        global_data.update(voting_result)
+        
+        # 5.5 模型比较和选择
+        print("\n" + "-"*30)
+        comparison_result = model_comparison_stage()()
+        if comparison_result is None:
+            print("模型比较和选择失败")
+            return
+        global_data.update(comparison_result)
+        
+        # 5.6 最终预测
+        print("\n" + "-"*30)
+        prediction_result = final_prediction_stage()()
+        if prediction_result is None:
+            print("最终预测失败")
+            return
+        global_data.update(prediction_result)
+        
+        # 6. 提交文件生成阶段
+        print("\n" + "="*50)
+        submission_result = submission_stage()()
+        if submission_result is None:
+            print("提交文件生成失败")
+            return
+        
+        # 更新全局数据
+        global_data.update(submission_result)
+        
+        print("\n" + "="*50)
+        print("=== 项目执行完成 ===")
+        print(f"结束时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        print(f"总用时: {datetime.now() - start_time}")
+        
+        # 打印最终结果总结
+        print(f"\n最终结果总结:")
+        print(f"  最佳模型: {global_data['best_model_name']}")
+        print(f"  最佳AUC: {global_data['cv_scores'][global_data['best_model_name']]:.4f}")
+        print(f"  训练样本数: {len(global_data['train_fe'])}")
+        print(f"  特征数: {global_data['train_fe'].shape[1]}")
+        print(f"  测试预测数: {len(global_data['test_predictions'])}")
         
     except Exception as e:
-        print(f"数据加载失败: {e}")
+        print(f"\n程序执行出错: {str(e)}")
+        import traceback
+        traceback.print_exc()
         return
-    
-    # 阶段1: 数据清洗
-    cleaning_func = data_cleaning_stage()
-    cleaning_result = cleaning_func()
-    if cleaning_result is not None:
-        global_data.update(cleaning_result)
-    else:
-        print("数据清洗阶段失败")
-        return
-    
-    # 阶段2: 探索性数据分析
-    eda_func = eda_stage()
-    eda_result = eda_func()
-    if eda_result is not None:
-        global_data.update(eda_result)
-    else:
-        print("EDA阶段失败")
-        return
-    
-    # 阶段3: 特征工程
-    fe_func = feature_engineering_stage()
-    fe_result = fe_func()
-    if fe_result is not None:
-        global_data.update(fe_result)
-    else:
-        print("特征工程阶段失败")
-        return
-    
-    # 阶段4: 建模
-    modeling_func = modeling_stage()
-    modeling_result = modeling_func()
-    if modeling_result is not None:
-        global_data.update(modeling_result)
-    else:
-        print("建模阶段失败")
-        return
-    
-    # 阶段5: 生成提交文件
-    submission_func = submission_stage()
-    submission_result = submission_func()
-    if submission_result is not None:
-        global_data['submission'] = submission_result
-        print("\n=== 执行完成 ===")
-        print(f"✓ 所有阶段执行成功")
-        print(f"✓ 提交文件已生成")
-        print(f"✓ 缓存已保存")
-        print(f"✓ 可视化图表已生成")
-        print("\n总结:")
-        print(f"- 数据清洗: {global_data['train_clean'].shape[0]} 条训练样本")
-        print(f"- 特征工程: {global_data['train_fe'].shape[1]} 个特征")
-        print(f"- 模型数量: {len(global_data['models'])}")
-        print(f"- 最佳模型: {global_data['best_model_name']}")
-        print(f"- 测试集预测数量: {len(global_data['test_predictions'])}")
-        print("="*60)
-    else:
-        print("提交文件生成阶段失败")
 
 # 如果作为主程序运行，执行main函数
 if __name__ == "__main__":
