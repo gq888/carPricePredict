@@ -169,7 +169,8 @@ def logistic_regression_stage():
         lr_param_grid = {
             'C': [0.1, 1, 10],
             'penalty': ['l1', 'l2'],
-            'class_weight': [None, 'balanced']
+            'class_weight': [None, 'balanced'],
+            'solver': ['liblinear']  # 添加支持L1正则化的求解器
         }
         
         lr_grid = GridSearchCV(

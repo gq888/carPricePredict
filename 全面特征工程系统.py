@@ -1048,21 +1048,12 @@ class ComprehensiveFeatureEngineering:
         print("开始全面特征工程处理...")
         start_time = datetime.now()
         
-        # === 类级别保护：识别并分离保护列 ===
-        df_data, df_protected = self._identify_protected_columns(df)
-        
-        if df_data.empty:
-            print("警告：没有数据列需要处理，直接返回保护列")
-            return df_protected
-        
-        print(f"开始处理数据列，原始形状: {df_data.shape}")
-        
         # 1. 数据清洗（仅处理数据列）- 添加缓存
         print("\n=== 数据清洗阶段（带缓存）===")
         
         # 检查缓存
         cleaning_dependencies = {
-            'df_data': df_data,
+            'df': df,
             'random_state': self.random_state
         }
         
@@ -1071,16 +1062,19 @@ class ComprehensiveFeatureEngineering:
         
         if cached_cleaning is not None:
             df_clean = cached_cleaning['df_clean']
+            df_protected = cached_cleaning['df_protected']
             # 恢复已拟合的转换器
             if 'fitted_transformers' in cached_cleaning:
                 self.fitted_transformers.update(cached_cleaning['fitted_transformers'])
             print("使用缓存的数据清洗结果")
         else:
+            df_data, df_protected = self._identify_protected_columns(df)
             df_clean = self.comprehensive_data_cleaning(df_data)
             
             # 保存缓存
             cleaning_result = {
                 'df_clean': df_clean,
+                'df_protected': df_protected,
                 'fitted_transformers': {k: v for k, v in self.fitted_transformers.items() if k != 'index_after_cleaning'}
             }
             save_cache(cache_key, cleaning_result, cleaning_dependencies)
