@@ -50,109 +50,6 @@ global_data = {}
 
 from cache_util import load_cache, save_cache, check_dependencies
 
-def eda_stage():
-    """探索性数据分析阶段 - 闭包函数"""
-    def perform_eda():
-        print("=== 探索性数据分析阶段 ===")
-        
-        # 检查依赖项
-        dependencies = {
-            'train_raw': global_data.get('train_raw'),
-            'test_raw': global_data.get('test_raw')
-        }
-        
-        if not check_dependencies(dependencies):
-            return None
-        
-        # 检查缓存
-        cache_key = 'eda'
-        cached_result = load_cache(cache_key, dependencies)
-        if cached_result is not None:
-            return cached_result
-        
-        # 获取清洗后的数据
-        train = global_data['train_raw'].copy()
-        test = global_data['test_raw'].copy()
-        
-        print(f"EDA分析 - 训练集: {train.shape}, 测试集: {test.shape}")
-        
-        # 1. 数据概览
-        print("1. 数据概览...")
-        print("训练集信息:")
-        print(train.info())
-        print("\n测试集信息:")
-        print(test.info())
-        
-        # 2. 数值特征分析
-        print("2. 数值特征分析...")
-        numeric_cols = train.select_dtypes(include=[np.number]).columns
-        
-        # 创建综合可视化
-        fig, axes = plt.subplots(2, 2, figsize=(15, 12))
-        fig.suptitle('数据探索性分析', fontsize=16)
-        
-        # 训练集标签分布
-        if '是否违约' in train.columns:
-            train['是否违约'].value_counts().plot(kind='bar', ax=axes[0,0], color=['skyblue', 'lightcoral'])
-            axes[0,0].set_title('训练集标签分布')
-            axes[0,0].set_xlabel('是否违约')
-            axes[0,0].set_ylabel('数量')
-            axes[0,0].tick_params(axis='x', rotation=0)
-        
-        # 贷款总额分布
-        if '贷款总额' in train.columns:
-            train['贷款总额'].hist(bins=50, ax=axes[0,1], color='lightblue', alpha=0.7)
-            axes[0,1].set_title('贷款总额分布')
-            axes[0,1].set_xlabel('贷款总额')
-            axes[0,1].set_ylabel('频次')
-        
-        # 相关性热力图（前10个数值特征）
-        if len(numeric_cols) > 0:
-            corr_cols = numeric_cols[:min(10, len(numeric_cols))]
-            if '是否违约' in train.columns:
-                corr_cols = list(corr_cols) + ['是否违约'] if '是否违约' not in corr_cols else corr_cols
-            
-            corr_matrix = train[corr_cols].corr()
-            sns.heatmap(corr_matrix, annot=True, cmap='coolwarm', center=0, ax=axes[1,0])
-            axes[1,0].set_title('特征相关性热力图')
-        
-        # 缺失值分析
-        missing_data = train.isnull().sum()
-        missing_data = missing_data[missing_data > 0].sort_values(ascending=False)
-        if len(missing_data) > 0:
-            missing_data.plot(kind='bar', ax=axes[1,1], color='orange')
-            axes[1,1].set_title('缺失值分析')
-            axes[1,1].set_xlabel('特征')
-            axes[1,1].set_ylabel('缺失值数量')
-            axes[1,1].tick_params(axis='x', rotation=45)
-        else:
-            axes[1,1].text(0.5, 0.5, '无缺失值', ha='center', va='center', transform=axes[1,1].transAxes)
-            axes[1,1].set_title('缺失值分析')
-        
-        plt.tight_layout()
-        plt.savefig('/Users/qingguo/Documents/project/carPricePredict/eda_visualization.png', dpi=300, bbox_inches='tight')
-        plt.show()
-        
-        # 3. 特征统计
-        print("3. 特征统计...")
-        print("数值特征描述性统计:")
-        print(train[numeric_cols].describe())
-        
-        print("\n分类特征统计:")
-        categorical_cols = train.select_dtypes(include=['object']).columns
-        for col in categorical_cols[:5]:  # 只显示前5个分类特征
-            print(f"\n{col}:")
-            print(train[col].value_counts().head())
-        
-        result = {'eda_completed': True}
-        
-        # 保存缓存
-        save_cache(cache_key, result, dependencies)
-        
-        return result
-    
-    return perform_eda
-
 def feature_engineering_stage():
     """特征工程阶段 - 闭包函数"""
     def engineer_features():
@@ -789,26 +686,6 @@ def main():
         print(f"数据加载成功 - 训练集: {train.shape}, 测试集: {test.shape}")
         print(f"训练集列名: {list(train.columns)}")
         print(f"测试集列名: {list(test.columns)}")
-        
-        # # 2. 数据清洗阶段
-        # print("\n" + "="*50)
-        # data_clean_result = data_cleaning_stage()()
-        # if data_clean_result is None:
-        #     print("数据清洗失败，程序终止")
-        #     return
-        
-        # # 更新全局数据
-        # global_data.update(data_clean_result)
-        
-        # 3. 探索性数据分析阶段
-        print("\n" + "="*50)
-        eda_result = eda_stage()()
-        if eda_result is None:
-            print("EDA失败，程序终止")
-            return
-        
-        # 更新全局数据
-        global_data.update(eda_result)
         
         # 4. 特征工程阶段
         print("\n" + "="*50)
