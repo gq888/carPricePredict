@@ -180,7 +180,8 @@ def feature_engineering_stage():
         print(f"特征工程 - 训练集: {train.shape}, 测试集: {test.shape}")
         
         # 尝试使用全面特征工程系统
-        try:
+        # try:
+        if True:
             from 全面特征工程系统 import ComprehensiveFeatureEngineering
             
             print("使用全面特征工程系统...")
@@ -225,13 +226,6 @@ def feature_engineering_stage():
                 'test_fe': test_fe,
                 'fe_system': fe_system
             }
-            
-        except Exception as e:
-            print(f"全面特征工程系统出错: {e}")
-            print("回退到基础特征工程...")
-            
-            # 基础特征工程
-            result = basic_feature_engineering(train, test)
         
         # 保存缓存
         save_cache(cache_key, result, dependencies)
@@ -239,60 +233,6 @@ def feature_engineering_stage():
         return result
     
     return engineer_features
-
-def basic_feature_engineering(train, test):
-    """基础特征工程"""
-    print("使用基础特征工程...")
-    
-    # 1. 标签编码
-    print("1. 标签编码...")
-    label_encoders = {}
-    categorical_cols = train.select_dtypes(include=['object']).columns
-    
-    for col in categorical_cols:
-        if col not in ['贷款ID']:  # 跳过ID列
-            le = LabelEncoder()
-            # 合并训练集和测试集的标签进行编码，避免测试集出现未知标签
-            combined_values = pd.concat([train[col], test[col]], axis=0).astype(str)
-            le.fit(combined_values)
-            
-            train[col] = le.transform(train[col].astype(str))
-            test[col] = le.transform(test[col].astype(str))
-            
-            label_encoders[col] = le
-    
-    # 2. 特征组合
-    print("2. 特征组合...")
-    # 创建一些派生特征
-    if '贷款总额' in train.columns and '月供' in train.columns:
-        train['贷款收入比'] = train['贷款总额'] / (train['月供'] * 12 + 1)  # 避免除零
-        test['贷款收入比'] = test['贷款总额'] / (test['月供'] * 12 + 1)
-    
-    if '信用卡数量' in train.columns and '信用卡总余额' in train.columns:
-        train['平均信用卡余额'] = train['信用卡总余额'] / (train['信用卡数量'] + 1)
-        test['平均信用卡余额'] = test['信用卡总余额'] / (test['信用卡数量'] + 1)
-    
-    # 3. 特征标准化
-    print("3. 特征标准化...")
-    scaler = StandardScaler()
-    numeric_cols = train.select_dtypes(include=[np.number]).columns
-    numeric_cols = [col for col in numeric_cols if col != '是否违约']  # 排除标签
-    
-    # 只在训练集上拟合scaler
-    scaler.fit(train[numeric_cols])
-    
-    # 转换训练集和测试集
-    train[numeric_cols] = scaler.transform(train[numeric_cols])
-    test[numeric_cols] = scaler.transform(test[numeric_cols])
-    
-    print(f"基础特征工程完成 - 训练集: {train.shape}, 测试集: {test.shape}")
-    
-    return {
-        'train_fe': train,
-        'test_fe': test,
-        'scaler': scaler,
-        'label_encoders': label_encoders
-    }
 
 def logistic_regression_stage():
     """Logistic Regression模型阶段 - 闭包函数"""

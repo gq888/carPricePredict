@@ -599,6 +599,12 @@ class ComprehensiveFeatureEngineering:
         
         if '贷款金额' in df.columns and '收入' in df.columns:
             df_domain['贷款收入比'] = df['贷款金额'] / (df['收入'] + 1e-8)
+    
+        # if '贷款总额' in df.columns and '月供' in df.columns:
+        #     df_domain['贷款收入比'] = df['贷款总额'] / (df['月供'] * 12 + 1)
+        
+        # if '信用卡数量' in df.columns and '信用卡总余额' in df.columns:
+        #     df_domain['平均信用卡余额'] = df['信用卡总余额'] / (df['信用卡数量'] + 1)
         
         # 年龄相关特征
         if '年龄' in df.columns:
@@ -1177,26 +1183,12 @@ def test_comprehensive_feature_engineering():
     try:
         train_data = pd.read_csv('/Users/qingguo/Documents/project/carPricePredict/data/train.csv')
         print(f"成功加载训练数据，形状: {train_data.shape}")
-        print(f"训练数据列名: {list(train_data.columns)}")
     except Exception as e:
         print(f"加载训练数据失败: {e}")
         return None, None, None
     
     # 分离特征和目标变量
-    target_col = '是否违约'  # 根据数据集确定目标变量列名
-    if target_col not in train_data.columns:
-        print(f"警告: 目标列 '{target_col}' 不存在，尝试其他可能的目标列名")
-        # 尝试其他可能的目标列名
-        possible_targets = ['是否违约', 'is_default', 'default', 'target', 'y']
-        target_col = None
-        for col in possible_targets:
-            if col in train_data.columns:
-                target_col = col
-                break
-        
-        if target_col is None:
-            print("错误: 无法找到目标变量列")
-            return None, None, None
+    target_col = '是否违约'
     
     print(f"使用目标列: {target_col}")
     
