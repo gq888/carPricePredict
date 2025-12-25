@@ -39,6 +39,44 @@ class ComprehensiveFeatureEngineering:
         self.random_state = random_state
         self.fitted_transformers = {}
         self.target = None
+        self.protected_columns = []  # 保护列（ID列）
+        self.target_columns = []     # 目标列
+        self.data_columns = []       # 数据列
+    
+    def _identify_protected_columns(self, df: pd.DataFrame) -> tuple:
+        """
+        识别并分离保护列和数据列
+        返回: (df_data, df_protected) - 数据列DataFrame和保护列DataFrame
+        """
+        print("=== 识别保护列 ===")
+        
+        # 重置列列表
+        self.protected_columns = []
+        self.target_columns = []
+        self.data_columns = []
+        
+        # 识别保护列（ID列）和目标列
+        for col in df.columns:
+            col_lower = col.lower()
+            if ('id' in col_lower or '贷款id' in col_lower or '用户id' in col_lower or 
+                col.endswith('_id') or col.startswith('id_')):
+                self.protected_columns.append(col)
+                print(f"   识别到ID列: {col}")
+            elif col == '是否违约':
+                self.target_columns.append(col)
+                print(f"   识别到目标列: {col}")
+            else:
+                self.data_columns.append(col)
+        
+        print(f"   保护列数量: {len(self.protected_columns)}")
+        print(f"   目标列数量: {len(self.target_columns)}")
+        print(f"   数据列数量: {len(self.data_columns)}")
+        
+        # 分离数据列和保护列
+        df_data = df[self.data_columns].copy() if self.data_columns else pd.DataFrame()
+        df_protected = df[self.protected_columns + self.target_columns].copy() if (self.protected_columns or self.target_columns) else pd.DataFrame()
+        
+        return df_data, df_protected
         
     def comprehensive_data_cleaning(self, df: pd.DataFrame) -> pd.DataFrame:
         """
@@ -1121,15 +1159,24 @@ class ComprehensiveFeatureEngineering:
 
     def fit_transform(self, df: pd.DataFrame, target: pd.Series = None) -> pd.DataFrame:
         """
-        完整的特征工程流程
+        完整的特征工程流程 - 类级别保护ID列和目标列
         """
         self.target = target
         
         print("开始全面特征工程处理...")
         start_time = datetime.now()
         
-        # 1. 数据清洗
-        df_clean = self.comprehensive_data_cleaning(df)
+        # === 类级别保护：识别并分离保护列 ===
+        df_data, df_protected = self._identify_protected_columns(df)
+        
+        if df_data.empty:
+            print("警告：没有数据列需要处理，直接返回保护列")
+            return df_protected
+        
+        print(f"开始处理数据列，原始形状: {df_data.shape}")
+        
+        # 1. 数据清洗（仅处理数据列）
+        df_clean = self.comprehensive_data_cleaning(df_data)
         
         # 如果数据清洗删除了行，需要同步更新目标变量
         if target is not None and 'index_after_cleaning' in self.fitted_transformers:
@@ -1138,30 +1185,39 @@ class ComprehensiveFeatureEngineering:
                 print(f"数据清洗删除了 {len(target) - len(cleaned_index)} 行，同步更新目标变量")
                 target = target.loc[cleaned_index]
         
-        # 2. 特征转换
+        # 2. 特征转换（仅处理数据列）
         df_transformed = self.comprehensive_feature_transformation(df_clean)
         
-        # 3. 特征创建
+        # 3. 特征创建（仅处理数据列）
         df_created = self.comprehensive_feature_creation(df_transformed)
         
-        # 4. 特征选择 (如果有目标变量)
+        # 4. 特征选择（仅处理数据列，如果有目标变量）
         if target is not None:
             df_selected = self.comprehensive_feature_selection(df_created, target)
         else:
             df_selected = df_created
         
-        # 5. 降维
+        # 5. 降维（仅处理数据列）
         df_reduced = self.comprehensive_dimensionality_reduction(df_selected)
+        
+        # === 重新合并保护列 ===
+        if not df_protected.empty:
+            print(f"重新合并保护列: {len(df_protected.columns)} 列")
+            # 确保索引对齐
+            df_final = pd.concat([df_reduced, df_protected], axis=1)
+            print(f"最终数据形状: {df_final.shape}")
+        else:
+            df_final = df_reduced
         
         end_time = datetime.now()
         processing_time = (end_time - start_time).total_seconds()
         
         print(f"\n全面特征工程处理完成!")
         print(f"处理时间: {processing_time:.2f} 秒")
-        print(f"特征变化: {df.shape[1]} -> {df_reduced.shape[1]}")
-        print(f"特征增长率: {(df_reduced.shape[1] / df.shape[1] - 1) * 100:.2f}%")
+        print(f"特征变化: {df.shape[1]} -> {df_final.shape[1]}")
+        print(f"特征增长率: {(df_final.shape[1] / df.shape[1] - 1) * 100:.2f}%")
         
-        return df_reduced
+        return df_final
     
     def save_transformers(self, filepath: str):
         """保存转换器"""
