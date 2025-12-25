@@ -2,6 +2,7 @@
 import pickle
 import hashlib
 import os
+import json
 from typing import Dict, Any, Tuple
 from datetime import datetime
 
@@ -15,8 +16,99 @@ def get_cache_path(stage_name: str) -> str:
 
 def get_dependency_hash(dependencies: Dict[str, Any]) -> str:
     """计算依赖项的哈希值"""
-    # 将依赖项转换为字符串并计算哈希
-    dep_str = str(sorted(dependencies.items()))
+    # 创建一个可序列化的依赖项表示
+    serializable_deps = {}
+    
+    for key, value in sorted(dependencies.items()):
+        if value is None:
+            serializable_deps[key] = None
+        elif hasattr(value, 'shape'):  # DataFrame、Series或numpy数组
+            # 对于DataFrame，使用形状、列名和数据的稳定哈希作为标识
+            if hasattr(value, 'columns') and len(value.columns) > 1:  # DataFrame
+                # 使用稳定的特征进行哈希：形状、列名、数据类型摘要
+                data_summary = []
+                for col in sorted(value.columns):
+                    col_data = value[col]
+                    if len(col_data) > 0:
+                        # 计算列数据的稳定摘要（前中后采样）
+                        sample_size = min(10, len(col_data))
+                        front = col_data.iloc[:sample_size].tolist()
+                        middle = col_data.iloc[len(col_data)//2:len(col_data)//2+sample_size].tolist() if len(col_data) > sample_size else front
+                        back = col_data.iloc[-sample_size:].tolist() if len(col_data) > sample_size else front
+                        data_summary.append({
+                            'col': col,
+                            'dtype': str(col_data.dtype),
+                            'samples': [front, middle, back]
+                        })
+                
+                serializable_deps[key] = {
+                    'type': 'DataFrame',
+                    'shape': value.shape,
+                    'columns': sorted(list(value.columns)),  # 排序确保一致性
+                    'data_summary': data_summary
+                }
+            elif hasattr(value, 'name') or (hasattr(value, 'columns') and len(value.columns) == 1):  # Series
+                # 对于Series，使用名称、形状和数据采样
+                series_name = getattr(value, 'name', 'unnamed')
+                if len(value) > 0:
+                    sample_size = min(20, len(value))
+                    front = value.iloc[:sample_size].tolist()
+                    middle = value.iloc[len(value)//2:len(value)//2+sample_size].tolist() if len(value) > sample_size else front
+                    back = value.iloc[-sample_size:].tolist() if len(value) > sample_size else front
+                    
+                    serializable_deps[key] = {
+                        'type': 'Series',
+                        'shape': value.shape,
+                        'name': series_name,
+                        'dtype': str(value.dtype),
+                        'samples': [front, middle, back]
+                    }
+                else:
+                    serializable_deps[key] = {
+                        'type': 'Series',
+                        'shape': value.shape,
+                        'name': series_name,
+                        'dtype': str(value.dtype),
+                        'samples': []
+                    }
+            else:  # numpy数组
+                # 对于numpy数组，使用形状、dtype和前中后采样
+                if value.size > 0:
+                    sample_size = min(100, value.size)
+                    flat = value.flatten()
+                    front = flat[:sample_size].tolist()
+                    middle = flat[len(flat)//2:len(flat)//2+sample_size].tolist() if len(flat) > sample_size else front
+                    back = flat[-sample_size:].tolist() if len(flat) > sample_size else front
+                    
+                    serializable_deps[key] = {
+                        'type': 'ndarray',
+                        'shape': value.shape,
+                        'dtype': str(value.dtype),
+                        'samples': [front, middle, back]
+                    }
+                else:
+                    serializable_deps[key] = {
+                        'type': 'ndarray',
+                        'shape': value.shape,
+                        'dtype': str(value.dtype),
+                        'samples': []
+                    }
+        elif isinstance(value, (str, int, float, bool)):
+            serializable_deps[key] = value
+        elif isinstance(value, (list, tuple)):
+            serializable_deps[key] = {'type': type(value).__name__, 'data': list(value)}
+        elif isinstance(value, dict):
+            serializable_deps[key] = {'type': 'dict', 'data': dict(sorted(value.items()))}
+        else:
+            # 对于其他复杂对象，使用其字符串表示和属性
+            serializable_deps[key] = {
+                'type': type(value).__name__,
+                'str_repr': str(value),
+                'hash': hashlib.md5(str(value).encode()).hexdigest()[:16]
+            }
+    
+    # 使用JSON序列化来确保一致的输出格式
+    dep_str = json.dumps(serializable_deps, sort_keys=True, separators=(',', ':'), default=str)
     return hashlib.md5(dep_str.encode()).hexdigest()
 
 def load_cache(stage_name: str, dependencies: Dict[str, Any]) -> Any:
