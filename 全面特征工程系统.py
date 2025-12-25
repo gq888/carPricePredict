@@ -1057,8 +1057,33 @@ class ComprehensiveFeatureEngineering:
         
         print(f"开始处理数据列，原始形状: {df_data.shape}")
         
-        # 1. 数据清洗（仅处理数据列）
-        df_clean = self.comprehensive_data_cleaning(df_data)
+        # 1. 数据清洗（仅处理数据列）- 添加缓存
+        print("\n=== 数据清洗阶段（带缓存）===")
+        
+        # 检查缓存
+        cleaning_dependencies = {
+            'df_data': df_data,
+            'random_state': self.random_state
+        }
+        
+        cache_key = 'comprehensive_data_cleaning'
+        cached_cleaning = load_cache(cache_key, cleaning_dependencies)
+        
+        if cached_cleaning is not None:
+            df_clean = cached_cleaning['df_clean']
+            # 恢复已拟合的转换器
+            if 'fitted_transformers' in cached_cleaning:
+                self.fitted_transformers.update(cached_cleaning['fitted_transformers'])
+            print("使用缓存的数据清洗结果")
+        else:
+            df_clean = self.comprehensive_data_cleaning(df_data)
+            
+            # 保存缓存
+            cleaning_result = {
+                'df_clean': df_clean,
+                'fitted_transformers': {k: v for k, v in self.fitted_transformers.items() if k != 'index_after_cleaning'}
+            }
+            save_cache(cache_key, cleaning_result, cleaning_dependencies)
         
         # 如果数据清洗删除了行，需要同步更新目标变量
         if target is not None and 'index_after_cleaning' in self.fitted_transformers:
@@ -1067,11 +1092,57 @@ class ComprehensiveFeatureEngineering:
                 print(f"数据清洗删除了 {len(target) - len(cleaned_index)} 行，同步更新目标变量")
                 target = target.loc[cleaned_index]
         
-        # 2. 特征转换（仅处理数据列）
-        df_transformed = self.comprehensive_feature_transformation(df_clean)
+        # 2. 特征转换（仅处理数据列）- 添加缓存
+        print("\n=== 特征转换阶段（带缓存）===")
         
-        # 3. 特征创建（仅处理数据列）
-        df_created = self.comprehensive_feature_creation(df_transformed)
+        # 检查缓存
+        transformation_dependencies = {
+            'df_clean': df_clean,
+            'random_state': self.random_state
+        }
+        
+        cache_key = 'comprehensive_feature_transformation'
+        cached_transformation = load_cache(cache_key, transformation_dependencies)
+        
+        if cached_transformation is not None:
+            df_transformed = cached_transformation['df_transformed']
+            # 恢复已拟合的转换器
+            if 'fitted_transformers' in cached_transformation:
+                self.fitted_transformers.update(cached_transformation['fitted_transformers'])
+            print("使用缓存的特征转换结果")
+        else:
+            df_transformed = self.comprehensive_feature_transformation(df_clean)
+            
+            # 保存缓存
+            transformation_result = {
+                'df_transformed': df_transformed,
+                'fitted_transformers': {k: v for k, v in self.fitted_transformers.items() if not k.startswith('index_')}
+            }
+            save_cache(cache_key, transformation_result, transformation_dependencies)
+        
+        # 3. 特征创建（仅处理数据列）- 添加缓存
+        print("\n=== 特征创建阶段（带缓存）===")
+        
+        # 检查缓存
+        creation_dependencies = {
+            'df_transformed': df_transformed,
+            'random_state': self.random_state
+        }
+        
+        cache_key = 'comprehensive_feature_creation'
+        cached_creation = load_cache(cache_key, creation_dependencies)
+        
+        if cached_creation is not None:
+            df_created = cached_creation['df_created']
+            print("使用缓存的特征创建结果")
+        else:
+            df_created = self.comprehensive_feature_creation(df_transformed)
+            
+            # 保存缓存
+            creation_result = {
+                'df_created': df_created
+            }
+            save_cache(cache_key, creation_result, creation_dependencies)
         
         # 4. 特征选择（仅处理数据列，如果有目标变量）
         if target is not None:
