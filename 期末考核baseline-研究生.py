@@ -164,6 +164,100 @@ def logistic_regression_stage():
         
         print(f"特征维度: {X.shape}, 标签维度: {y.shape}")
         
+        # 处理缺失值 - 关键步骤
+        print("处理缺失值...")
+        
+        # 1. 删除全为缺失值的列（只删除在训练集和测试集都存在的列）
+        cols_all_na = X.columns[X.isnull().all()]
+        # 只删除在两个数据集中都存在的列
+        cols_to_drop = [col for col in cols_all_na if col in X_test.columns]
+        if len(cols_to_drop) > 0:
+            print(f"删除全为缺失值的列: {list(cols_to_drop)}")
+            X = X.drop(columns=cols_to_drop)
+        
+        # 删除训练集中存在但测试集中不存在的列（避免后续处理出错）
+        cols_only_in_train = [col for col in X.columns if col not in X_test.columns]
+        if len(cols_only_in_train) > 0:
+            print(f"删除训练集独有的列: {len(cols_only_in_train)} 列")
+            X = X.drop(columns=cols_only_in_train)
+            X_test = X_test.drop(columns=cols_to_drop)
+        
+        # 删除训练集中存在但测试集中不存在的列（避免后续处理出错）
+        cols_only_in_train = [col for col in X.columns if col not in X_test.columns]
+        if len(cols_only_in_train) > 0:
+            print(f"删除训练集独有的列: {len(cols_only_in_train)} 列")
+            X = X.drop(columns=cols_only_in_train)
+        
+        # 删除训练集中存在但测试集中不存在的列（避免后续处理出错）
+        cols_only_in_train = [col for col in X.columns if col not in X_test.columns]
+        if len(cols_only_in_train) > 0:
+            print(f"删除训练集独有的列: {len(cols_only_in_train)} 列")
+            X = X.drop(columns=cols_only_in_train)
+        
+        # 2. 处理剩余的缺失值（只处理在两个数据集中都存在的列）
+        if X.isnull().sum().sum() > 0:
+            print(f"处理剩余缺失值: {X.isnull().sum().sum()} 个")
+            
+            # 数值列用中位数填充
+            numeric_cols = X.select_dtypes(include=[np.number]).columns
+            for col in numeric_cols:
+                if col in X_test.columns and X[col].isnull().sum() > 0:
+                    median_val = X[col].median()
+                    X[col] = X[col].fillna(median_val)
+                    X_test[col] = X_test[col].fillna(median_val)
+                    print(f"  {col}: 用中位数 {median_val} 填充 {X[col].isnull().sum()} 个缺失值")
+            
+            # 分类列用众数填充
+            categorical_cols = X.select_dtypes(include=['object']).columns
+            for col in categorical_cols:
+                if col in X_test.columns and X[col].isnull().sum() > 0:
+                    mode_val = X[col].mode()[0] if len(X[col].mode()) > 0 else 'unknown'
+                    X[col] = X[col].fillna(mode_val)
+                    X_test[col] = X_test[col].fillna(mode_val)
+                    print(f"  {col}: 用众数 {mode_val} 填充 {X[col].isnull().sum()} 个缺失值")
+        
+        print(f"处理后特征维度: {X.shape}")
+        print(f"训练集缺失值总数: {X.isnull().sum().sum()}")
+        print(f"测试集缺失值总数: {X_test.isnull().sum().sum()}")
+        
+        # 处理缺失值 - 关键步骤
+        print("处理缺失值...")
+        
+        # 1. 删除全为缺失值的列（只删除在训练集和测试集都存在的列）
+        cols_all_na = X.columns[X.isnull().all()]
+        # 只删除在两个数据集中都存在的列
+        cols_to_drop = [col for col in cols_all_na if col in X_test.columns]
+        if len(cols_to_drop) > 0:
+            print(f"删除全为缺失值的列: {list(cols_to_drop)}")
+            X = X.drop(columns=cols_to_drop)
+            X_test = X_test.drop(columns=cols_to_drop)
+        
+        # 2. 处理剩余的缺失值（只处理在两个数据集中都存在的列）
+        if X.isnull().sum().sum() > 0:
+            print(f"处理剩余缺失值: {X.isnull().sum().sum()} 个")
+            
+            # 数值列用中位数填充
+            numeric_cols = X.select_dtypes(include=[np.number]).columns
+            for col in numeric_cols:
+                if col in X_test.columns and X[col].isnull().sum() > 0:
+                    median_val = X[col].median()
+                    X[col] = X[col].fillna(median_val)
+                    X_test[col] = X_test[col].fillna(median_val)
+                    print(f"  {col}: 用中位数 {median_val} 填充 {X[col].isnull().sum()} 个缺失值")
+            
+            # 分类列用众数填充
+            categorical_cols = X.select_dtypes(include=['object']).columns
+            for col in categorical_cols:
+                if col in X_test.columns and X[col].isnull().sum() > 0:
+                    mode_val = X[col].mode()[0] if len(X[col].mode()) > 0 else 'unknown'
+                    X[col] = X[col].fillna(mode_val)
+                    X_test[col] = X_test[col].fillna(mode_val)
+                    print(f"  {col}: 用众数 {mode_val} 填充 {X[col].isnull().sum()} 个缺失值")
+        
+        print(f"处理后特征维度: {X.shape}")
+        print(f"训练集缺失值总数: {X.isnull().sum().sum()}")
+        print(f"测试集缺失值总数: {X_test.isnull().sum().sum()}")
+        
         # Logistic Regression with GridSearchCV
         print("Logistic Regression with Cross-Validation...")
         lr_param_grid = {
@@ -343,6 +437,40 @@ def stacking_stage():
         y = train_fe['是否违约']
         
         print(f"特征维度: {X.shape}, 标签维度: {y.shape}")
+        
+        # 处理缺失值 - 关键步骤
+        print("处理缺失值...")
+        
+        # 1. 删除全为缺失值的列（只删除在训练集和测试集都存在的列）
+        cols_all_na = X.columns[X.isnull().all()]
+        # 只删除在两个数据集中都存在的列
+        cols_to_drop = [col for col in cols_all_na]# if col in X_test.columns]
+        if len(cols_to_drop) > 0:
+            print(f"删除全为缺失值的列: {list(cols_to_drop)}")
+            X = X.drop(columns=cols_to_drop)
+        
+        # 2. 处理剩余的缺失值
+        if X.isnull().sum().sum() > 0:
+            print(f"处理剩余缺失值: {X.isnull().sum().sum()} 个")
+            
+            # 数值列用中位数填充
+            numeric_cols = X.select_dtypes(include=[np.number]).columns
+            for col in numeric_cols:
+                if X[col].isnull().sum() > 0:
+                    median_val = X[col].median()
+                    X[col] = X[col].fillna(median_val)
+                    print(f"  {col}: 用中位数 {median_val} 填充 {X[col].isnull().sum()} 个缺失值")
+            
+            # 分类列用众数填充
+            categorical_cols = X.select_dtypes(include=['object']).columns
+            for col in categorical_cols:
+                if X[col].isnull().sum() > 0:
+                    mode_val = X[col].mode()[0] if len(X[col].mode()) > 0 else 'unknown'
+                    X[col] = X[col].fillna(mode_val)
+                    print(f"  {col}: 用众数 {mode_val} 填充 {X[col].isnull().sum()} 个缺失值")
+        
+        print(f"处理后特征维度: {X.shape}")
+        print(f"训练集缺失值总数: {X.isnull().sum().sum()}")
         
         # 模型集成 - 堆叠法 (Stacking)
         print("模型集成 - Stacking...")
