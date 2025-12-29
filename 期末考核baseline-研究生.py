@@ -50,6 +50,83 @@ global_data = {}
 
 from cache_util import load_cache, save_cache, check_dependencies
 
+
+def prepare_model_data(train_df: pd.DataFrame,
+                       test_df: pd.DataFrame,
+                       stage_name: str = "",
+                       target_col: str = '是否违约',
+                       id_col: str = '贷款ID'):
+    """对齐训练/测试特征列并处理缺失值，返回(X, y, X_test)。"""
+    stage_prefix = f"[{stage_name}] " if stage_name else ""
+    print(f"{stage_prefix}对齐特征列并处理缺失值...")
+
+    train_processed = train_df.copy()
+    test_processed = test_df.copy()
+
+    if target_col not in train_processed.columns:
+        raise KeyError(f"训练数据中未找到目标列: {target_col}")
+
+    y_train = train_processed[target_col].copy()
+    X_train = train_processed.drop(columns=[target_col, id_col], errors='ignore').copy()
+    X_test = test_processed.drop(columns=[id_col], errors='ignore').copy()
+
+    common_cols = [col for col in X_train.columns if col in X_test.columns]
+    train_only_cols = [col for col in X_train.columns if col not in common_cols]
+    test_only_cols = [col for col in X_test.columns if col not in X_train.columns]
+
+    if train_only_cols:
+        print(f"{stage_prefix}移除训练集独有列: {len(train_only_cols)}")
+    if test_only_cols:
+        print(f"{stage_prefix}移除测试集独有列: {len(test_only_cols)}")
+        X_test = X_test.drop(columns=test_only_cols)
+
+    X_train = X_train[common_cols]
+    X_test = X_test[common_cols]
+
+    all_na_cols = [col for col in X_train.columns
+                   if X_train[col].isna().all() and X_test[col].isna().all()]
+    if all_na_cols:
+        print(f"{stage_prefix}删除全为缺失值的列: {len(all_na_cols)}")
+        X_train = X_train.drop(columns=all_na_cols)
+        X_test = X_test.drop(columns=all_na_cols)
+
+    numeric_cols = X_train.select_dtypes(include=['number', 'float', 'int', 'Int64', 'Float64', 'Float32']).columns
+    for col in numeric_cols:
+        median_val = X_train[col].median()
+        if pd.isna(median_val):
+            median_val = X_test[col].median()
+        if pd.isna(median_val):
+            median_val = 0.0
+        X_train[col] = X_train[col].fillna(median_val)
+        X_test[col] = X_test[col].fillna(median_val)
+
+    categorical_cols = X_train.select_dtypes(include=['object', 'category']).columns
+    for col in categorical_cols:
+        mode_vals = X_train[col].mode(dropna=True)
+        if mode_vals.empty:
+            mode_vals = X_test[col].mode(dropna=True)
+        fill_value = mode_vals.iloc[0] if not mode_vals.empty else 'unknown'
+        X_train[col] = X_train[col].fillna(fill_value)
+        X_test[col] = X_test[col].fillna(fill_value)
+
+    remaining_cols = [col for col in X_train.columns
+                      if X_train[col].isna().any() or X_test[col].isna().any()]
+    for col in remaining_cols:
+        if pd.api.types.is_numeric_dtype(X_train[col]):
+            fill_value = 0.0
+        else:
+            fill_value = 'unknown'
+        X_train[col] = X_train[col].fillna(fill_value)
+        X_test[col] = X_test[col].fillna(fill_value)
+
+    train_missing = int(X_train.isna().sum().sum())
+    test_missing = int(X_test.isna().sum().sum())
+    print(f"{stage_prefix}缺失值处理完成。训练集缺失值: {train_missing}, 测试集缺失值: {test_missing}")
+    print(f"{stage_prefix}最终特征数: {X_train.shape[1]}")
+
+    return X_train, y_train, X_test
+
+
 def feature_engineering_stage():
     """特征工程阶段 - 闭包函数"""
     def engineer_features():
@@ -158,105 +235,9 @@ def logistic_regression_stage():
         print(f"Logistic Regression - 训练集: {train_fe.shape}, 测试集: {test_fe.shape}")
         
         # 准备数据
-        X = train_fe.drop(columns=['是否违约', '贷款ID'])
-        y = train_fe['是否违约']
-        X_test = test_fe.drop(columns=['贷款ID'])
+        X, y, _ = prepare_model_data(train_fe, test_fe, stage_name="Logistic Regression")
         
         print(f"特征维度: {X.shape}, 标签维度: {y.shape}")
-        
-        # 处理缺失值 - 关键步骤
-        print("处理缺失值...")
-        
-        # 1. 删除全为缺失值的列（只删除在训练集和测试集都存在的列）
-        cols_all_na = X.columns[X.isnull().all()]
-        # 只删除在两个数据集中都存在的列
-        cols_to_drop = [col for col in cols_all_na if col in X_test.columns]
-        if len(cols_to_drop) > 0:
-            print(f"删除全为缺失值的列: {list(cols_to_drop)}")
-            X = X.drop(columns=cols_to_drop)
-        
-        # 删除训练集中存在但测试集中不存在的列（避免后续处理出错）
-        cols_only_in_train = [col for col in X.columns if col not in X_test.columns]
-        if len(cols_only_in_train) > 0:
-            print(f"删除训练集独有的列: {len(cols_only_in_train)} 列")
-            X = X.drop(columns=cols_only_in_train)
-            X_test = X_test.drop(columns=cols_to_drop)
-        
-        # 删除训练集中存在但测试集中不存在的列（避免后续处理出错）
-        cols_only_in_train = [col for col in X.columns if col not in X_test.columns]
-        if len(cols_only_in_train) > 0:
-            print(f"删除训练集独有的列: {len(cols_only_in_train)} 列")
-            X = X.drop(columns=cols_only_in_train)
-        
-        # 删除训练集中存在但测试集中不存在的列（避免后续处理出错）
-        cols_only_in_train = [col for col in X.columns if col not in X_test.columns]
-        if len(cols_only_in_train) > 0:
-            print(f"删除训练集独有的列: {len(cols_only_in_train)} 列")
-            X = X.drop(columns=cols_only_in_train)
-        
-        # 2. 处理剩余的缺失值（只处理在两个数据集中都存在的列）
-        if X.isnull().sum().sum() > 0:
-            print(f"处理剩余缺失值: {X.isnull().sum().sum()} 个")
-            
-            # 数值列用中位数填充
-            numeric_cols = X.select_dtypes(include=[np.number]).columns
-            for col in numeric_cols:
-                if col in X_test.columns and X[col].isnull().sum() > 0:
-                    median_val = X[col].median()
-                    X[col] = X[col].fillna(median_val)
-                    X_test[col] = X_test[col].fillna(median_val)
-                    print(f"  {col}: 用中位数 {median_val} 填充 {X[col].isnull().sum()} 个缺失值")
-            
-            # 分类列用众数填充
-            categorical_cols = X.select_dtypes(include=['object']).columns
-            for col in categorical_cols:
-                if col in X_test.columns and X[col].isnull().sum() > 0:
-                    mode_val = X[col].mode()[0] if len(X[col].mode()) > 0 else 'unknown'
-                    X[col] = X[col].fillna(mode_val)
-                    X_test[col] = X_test[col].fillna(mode_val)
-                    print(f"  {col}: 用众数 {mode_val} 填充 {X[col].isnull().sum()} 个缺失值")
-        
-        print(f"处理后特征维度: {X.shape}")
-        print(f"训练集缺失值总数: {X.isnull().sum().sum()}")
-        print(f"测试集缺失值总数: {X_test.isnull().sum().sum()}")
-        
-        # 处理缺失值 - 关键步骤
-        print("处理缺失值...")
-        
-        # 1. 删除全为缺失值的列（只删除在训练集和测试集都存在的列）
-        cols_all_na = X.columns[X.isnull().all()]
-        # 只删除在两个数据集中都存在的列
-        cols_to_drop = [col for col in cols_all_na if col in X_test.columns]
-        if len(cols_to_drop) > 0:
-            print(f"删除全为缺失值的列: {list(cols_to_drop)}")
-            X = X.drop(columns=cols_to_drop)
-            X_test = X_test.drop(columns=cols_to_drop)
-        
-        # 2. 处理剩余的缺失值（只处理在两个数据集中都存在的列）
-        if X.isnull().sum().sum() > 0:
-            print(f"处理剩余缺失值: {X.isnull().sum().sum()} 个")
-            
-            # 数值列用中位数填充
-            numeric_cols = X.select_dtypes(include=[np.number]).columns
-            for col in numeric_cols:
-                if col in X_test.columns and X[col].isnull().sum() > 0:
-                    median_val = X[col].median()
-                    X[col] = X[col].fillna(median_val)
-                    X_test[col] = X_test[col].fillna(median_val)
-                    print(f"  {col}: 用中位数 {median_val} 填充 {X[col].isnull().sum()} 个缺失值")
-            
-            # 分类列用众数填充
-            categorical_cols = X.select_dtypes(include=['object']).columns
-            for col in categorical_cols:
-                if col in X_test.columns and X[col].isnull().sum() > 0:
-                    mode_val = X[col].mode()[0] if len(X[col].mode()) > 0 else 'unknown'
-                    X[col] = X[col].fillna(mode_val)
-                    X_test[col] = X_test[col].fillna(mode_val)
-                    print(f"  {col}: 用众数 {mode_val} 填充 {X[col].isnull().sum()} 个缺失值")
-        
-        print(f"处理后特征维度: {X.shape}")
-        print(f"训练集缺失值总数: {X.isnull().sum().sum()}")
-        print(f"测试集缺失值总数: {X_test.isnull().sum().sum()}")
         
         # Logistic Regression with GridSearchCV
         print("Logistic Regression with Cross-Validation...")
@@ -342,9 +323,7 @@ def random_forest_stage():
         print(f"Random Forest - 训练集: {train_fe.shape}, 测试集: {test_fe.shape}")
         
         # 准备数据
-        X = train_fe.drop(columns=['是否违约', '贷款ID'])
-        y = train_fe['是否违约']
-        X_test = test_fe.drop(columns=['贷款ID'])
+        X, y, _ = prepare_model_data(train_fe, test_fe, stage_name="Random Forest")
         
         print(f"特征维度: {X.shape}, 标签维度: {y.shape}")
         
@@ -433,40 +412,9 @@ def stacking_stage():
         print(f"Stacking - 训练集: {train_fe.shape}, 测试集: {test_fe.shape}")
 
         # 准备数据
-        X = train_fe.drop(columns=['是否违约', '贷款ID'])
-        y = train_fe['是否违约']
+        X, y, _ = prepare_model_data(train_fe, test_fe, stage_name="Stacking")
 
         print(f"特征维度: {X.shape}, 标签维度: {y.shape}")
-
-        # 处理缺失值 - 关键步骤
-        print("处理缺失值...")
-
-        # 1. 删除全为缺失值的列
-        cols_all_na = X.columns[X.isnull().all()]
-        if len(cols_all_na) > 0:
-            print(f"删除全为缺失值的列: {list(cols_all_na)}")
-            X = X.drop(columns=cols_all_na)
-
-        # 2. 处理剩余的缺失值
-        if X.isnull().sum().sum() > 0:
-            total_missing = int(X.isnull().sum().sum())
-            print(f"处理剩余缺失值: {total_missing} 个")
-
-            numeric_cols = X.select_dtypes(include=[np.number]).columns
-            for col in numeric_cols:
-                if X[col].isnull().any():
-                    median_val = X[col].median()
-                    X[col] = X[col].fillna(median_val)
-
-            categorical_cols = X.select_dtypes(include=['object']).columns
-            for col in categorical_cols:
-                if X[col].isnull().any():
-                    mode_vals = X[col].mode(dropna=True)
-                    fill_value = mode_vals.iloc[0] if not mode_vals.empty else 'unknown'
-                    X[col] = X[col].fillna(fill_value)
-
-        print(f"处理后特征维度: {X.shape}")
-        print(f"训练集缺失值总数: {int(X.isnull().sum().sum())}")
 
         # 模型集成 - 堆叠法 (Stacking)
         print("模型集成 - Stacking...")
@@ -578,8 +526,7 @@ def voting_stage():
         print(f"Voting - 训练集: {train_fe.shape}, 测试集: {test_fe.shape}")
         
         # 准备数据
-        X = train_fe.drop(columns=['是否违约', '贷款ID'])
-        y = train_fe['是否违约']
+        X, y, _ = prepare_model_data(train_fe, test_fe, stage_name="Voting")
         
         print(f"特征维度: {X.shape}, 标签维度: {y.shape}")
         
