@@ -674,10 +674,8 @@ def final_prediction_stage():
         train_fe = global_data['train_fe'].copy()
         test_fe = global_data['test_fe'].copy()
         
-        # 准备数据
-        X = train_fe.drop(columns=['是否违约', '贷款ID'])
-        y = train_fe['是否违约']
-        X_test = test_fe.drop(columns=['贷款ID'])
+        # 准备数据 - 使用与训练阶段相同的prepare_model_data函数确保一致性
+        X, y, X_test = prepare_model_data(train_fe, test_fe, stage_name="Final Prediction")
         
         print(f"特征维度: {X.shape}, 标签维度: {y.shape}")
         
