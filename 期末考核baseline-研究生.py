@@ -454,7 +454,7 @@ def stacking_stage():
         stacking_model = StackingClassifier(
             estimators=base_models,
             final_estimator=meta_model,
-            cv=inner_cv,
+            cv=3,
             stack_method='predict_proba',
             n_jobs=-1,
             verbose=2
@@ -752,6 +752,7 @@ def submission_stage():
             return None
         
         test_predictions = global_data['test_predictions']
+        test_probabilities = global_data['test_probabilities']
         test_raw = global_data['test_raw']
         
         # 使用原始测试集的贷款ID字段
@@ -760,7 +761,7 @@ def submission_stage():
         # 创建提交文件
         submission = pd.DataFrame({
             'ID': loan_ids,
-            'label': test_predictions
+            'label': test_probabilities
         })
         
         # 保存提交文件
@@ -771,7 +772,7 @@ def submission_stage():
         print(f"✓ 提交文件已生成: {submission_filename}")
         print(f"提交文件形状: {submission.shape}")
         print(f"预测结果分布:")
-        print(submission['是否违约'].value_counts())
+        print(submission['label'].value_counts())
         
         return submission
     
@@ -779,8 +780,9 @@ def submission_stage():
 
 def main():
     """主函数 - 执行完整的机器学习流程"""
+    start_time = datetime.now()
     print("=== 贷款违约预测项目 ===")
-    print(f"开始时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"开始时间: {start_time.strftime('%Y-%m-%d %H:%M:%S')}")
     
     try:
         # 1. 数据加载阶段
