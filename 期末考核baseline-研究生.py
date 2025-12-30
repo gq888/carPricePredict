@@ -12,7 +12,7 @@ from sklearn.preprocessing import LabelEncoder, StandardScaler
 from sklearn.model_selection import train_test_split, cross_val_score, GridSearchCV
 from sklearn.linear_model import LogisticRegression
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import accuracy_score, classification_report, roc_auc_score
+from sklearn.metrics import accuracy_score, classification_report
 import matplotlib.pyplot as plt
 import matplotlib.font_manager as fm
 import seaborn as sns
@@ -244,7 +244,7 @@ def evaluate_imbalanced_model(model, X_test, y_test, model_name="Model"):
     返回:
     评估结果字典
     """
-    from sklearn.metrics import classification_report, confusion_matrix, roc_auc_score, precision_recall_curve, auc
+    from sklearn.metrics import classification_report, confusion_matrix, precision_recall_curve, auc
     import seaborn as sns
     
     # 预测
@@ -253,7 +253,8 @@ def evaluate_imbalanced_model(model, X_test, y_test, model_name="Model"):
     
     # 基础指标
     print(f"\n=== {model_name} 模型评估 ===")
-    print(f"ROC-AUC: {roc_auc_score(y_test, y_pred_proba):.4f}")
+    accuracy = accuracy_score(y_test, y_pred)
+    print(f"准确率 (Accuracy): {accuracy:.4f}")
     
     # 分类报告
     print("\n分类报告:")
@@ -277,7 +278,7 @@ def evaluate_imbalanced_model(model, X_test, y_test, model_name="Model"):
     print(f"F1分数: {f1:.4f}")
     print(f"特异度 (Specificity): {specificity:.4f}")
     
-    # PR-AUC (对不平衡数据更敏感)
+    # 计算额外指标用于不平衡数据评估
     precision_curve, recall_curve, _ = precision_recall_curve(y_test, y_pred_proba)
     pr_auc = auc(recall_curve, precision_curve)
     print(f"PR-AUC: {pr_auc:.4f}")
@@ -294,12 +295,12 @@ def evaluate_imbalanced_model(model, X_test, y_test, model_name="Model"):
                 dpi=300, bbox_inches='tight')
     plt.show()
     
-    # 可视化PR曲线
+    # 可视化精确率-召回率曲线
     plt.figure(figsize=(8, 6))
     plt.plot(recall_curve, precision_curve, label=f'PR曲线 (AUC = {pr_auc:.3f})')
     plt.xlabel('召回率')
     plt.ylabel('精确率')
-    plt.title(f'{model_name} - PR曲线')
+    plt.title(f'{model_name} - 精确率-召回率曲线')
     plt.legend()
     plt.grid(True)
     plt.savefig(f'/Users/qingguo/Documents/project/carPricePredict/pr_curve_{model_name.replace(" ", "_")}.png', 
@@ -307,7 +308,7 @@ def evaluate_imbalanced_model(model, X_test, y_test, model_name="Model"):
     plt.show()
     
     return {
-        'roc_auc': roc_auc_score(y_test, y_pred_proba),
+        'accuracy': accuracy,
         'pr_auc': pr_auc,
         'precision': precision,
         'recall': recall,
@@ -470,13 +471,13 @@ def logistic_regression_stage():
                 LogisticRegression(max_iter=1000, random_state=42),
                 lr_param_grid,
                 cv=3,
-                scoring='roc_auc',
+                scoring='accuracy',
                 n_jobs=-1
             )
             
             lr_grid.fit(X_balanced, y_balanced)
             
-            print(f"{method} - Best AUC: {lr_grid.best_score_:.4f}")
+            print(f"{method} - Best Accuracy: {lr_grid.best_score_:.4f}")
             print(f"Best params: {lr_grid.best_params_}")
             
             if lr_grid.best_score_ > best_score:
@@ -484,10 +485,10 @@ def logistic_regression_stage():
                 best_model = lr_grid
                 best_method = method
         
-        print(f"\n最佳数据平衡方法: {best_method}, 最佳AUC: {best_score:.4f}")
+        print(f"\n最佳数据平衡方法: {best_method}, 最佳Accuracy: {best_score:.4f}")
         lr_grid = best_model
         
-        print(f"Logistic Regression - Best AUC: {lr_grid.best_score_:.4f}")
+        print(f"Logistic Regression - Best Accuracy: {lr_grid.best_score_:.4f}")
         print(f"Best params: {lr_grid.best_params_}")
         
         # 特征重要性分析
@@ -595,13 +596,13 @@ def random_forest_stage():
                 RandomForestClassifier(random_state=42, n_jobs=-1),
                 rf_param_grid,
                 cv=3,
-                scoring='roc_auc',
+                scoring='accuracy',
                 n_jobs=-1
             )
             
             rf_grid.fit(X_balanced, y_balanced)
             
-            print(f"{method} - Best AUC: {rf_grid.best_score_:.4f}")
+            print(f"{method} - Best Accuracy: {rf_grid.best_score_:.4f}")
             print(f"Best params: {rf_grid.best_params_}")
             
             if rf_grid.best_score_ > best_score:
@@ -609,10 +610,10 @@ def random_forest_stage():
                 best_model = rf_grid
                 best_method = method
         
-        print(f"\n最佳数据平衡方法: {best_method}, 最佳AUC: {best_score:.4f}")
+        print(f"\n最佳数据平衡方法: {best_method}, 最佳Accuracy: {best_score:.4f}")
         rf_grid = best_model
         
-        print(f"Random Forest - Best AUC: {rf_grid.best_score_:.4f}")
+        print(f"Random Forest - Best Accuracy: {rf_grid.best_score_:.4f}")
         print(f"Best params: {rf_grid.best_params_}")
         
         # 特征重要性分析
@@ -741,7 +742,7 @@ def stacking_stage():
             X,
             y,
             cv=eval_cv,
-            scoring='roc_auc',
+            scoring='accuracy',
             n_jobs=-1,
             verbose=2
         )
@@ -749,7 +750,7 @@ def stacking_stage():
         stacking_cv_score = stacking_cv_scores.mean()
         print(f"交叉验证完成，用时: {cv_end - cv_start}")
 
-        print(f"Stacking - AUC: {stacking_cv_score:.4f} (std: {stacking_cv_scores.std():.4f})")
+        print(f"Stacking - Accuracy: {stacking_cv_score:.4f} (std: {stacking_cv_scores.std():.4f})")
 
         result = {
             'stacking_model': stacking_model,
@@ -815,9 +816,9 @@ def voting_stage():
         voting_model.fit(X, y)
         
         # 评估投票模型
-        voting_cv_score = cross_val_score(voting_model, X, y, cv=3, scoring='roc_auc').mean()
+        voting_cv_score = cross_val_score(voting_model, X, y, cv=3, scoring='accuracy').mean()
         
-        print(f"Voting - AUC: {voting_cv_score:.4f}")
+        print(f"Voting - Accuracy: {voting_cv_score:.4f}")
         
         result = {
             'voting_model': voting_model,
@@ -864,7 +865,7 @@ def model_comparison_stage():
         # 选择最佳模型
         best_model_name = max(cv_scores, key=cv_scores.get)
         
-        print(f"最佳模型: {best_model_name} (AUC: {cv_scores[best_model_name]:.4f})")
+        print(f"最佳模型: {best_model_name} (Accuracy: {cv_scores[best_model_name]:.4f})")
         print("\n所有模型性能:")
         for model_name, score in sorted(cv_scores.items(), key=lambda x: x[1], reverse=True):
             print(f"  {model_name}: {score:.4f}")
@@ -872,8 +873,8 @@ def model_comparison_stage():
         # 模型性能对比
         performance_df = pd.DataFrame({
             'Model': list(cv_scores.keys()),
-            'CV_AUC': list(cv_scores.values())
-        }).sort_values('CV_AUC', ascending=False)
+            'CV_Accuracy': list(cv_scores.values())
+        }).sort_values('CV_Accuracy', ascending=False)
         
         print("\n模型交叉验证性能排名:")
         print(performance_df)
@@ -881,17 +882,17 @@ def model_comparison_stage():
         # 绘制模型性能对比图
         plt.figure(figsize=(12, 6))
         plt.subplot(1, 2, 1)
-        plt.bar(performance_df['Model'], performance_df['CV_AUC'])
+        plt.bar(performance_df['Model'], performance_df['CV_Accuracy'])
         plt.xlabel('模型')
-        plt.ylabel('交叉验证AUC')
+        plt.ylabel('交叉验证准确率')
         plt.title('模型性能对比')
         plt.xticks(rotation=45)
         plt.tight_layout()
         
         # 绘制模型性能对比图（水平条形图）
         plt.subplot(1, 2, 2)
-        plt.barh(performance_df['Model'], performance_df['CV_AUC'])
-        plt.xlabel('交叉验证AUC')
+        plt.barh(performance_df['Model'], performance_df['CV_Accuracy'])
+        plt.xlabel('交叉验证准确率')
         plt.ylabel('模型')
         plt.title('模型性能排名')
         
@@ -1057,7 +1058,7 @@ def main():
     try:
         # 1. 数据加载阶段
         train = pd.read_csv('/Users/qingguo/Documents/project/carPricePredict/data/train.csv')
-        test = pd.read_csv('/Users/qingguo/Documents/project/carPricePredict/data/testA.csv')
+        test = pd.read_csv('/Users/qingguo/Documents/project/carPricePredict/data/testB.csv')
         
         global_data['train_raw'] = train
         global_data['test_raw'] = test
@@ -1176,7 +1177,7 @@ def main():
         # 打印最终结果总结
         print(f"\n最终结果总结:")
         print(f"  最佳模型: {global_data['best_model_name']}")
-        print(f"  最佳AUC: {global_data['cv_scores'][global_data['best_model_name']]:.4f}")
+        print(f"  最佳准确率: {global_data['cv_scores'][global_data['best_model_name']]:.4f}")
         print(f"  训练样本数: {len(global_data['train_fe'])}")
         print(f"  特征数: {global_data['train_fe'].shape[1]}")
         print(f"  测试预测数: {len(global_data['test_predictions'])}")
