@@ -18,6 +18,41 @@ import matplotlib.font_manager as fm
 import seaborn as sns
 from datetime import datetime
 import warnings
+import subprocess
+import sys
+
+def install_package(package):
+    """安装Python包"""
+    try:
+        subprocess.check_call([sys.executable, "-m", "pip", "install", package])
+        print(f"✓ 成功安装 {package}")
+        return True
+    except subprocess.CalledProcessError:
+        print(f"✗ 安装 {package} 失败")
+        return False
+
+def check_and_install_requirements():
+    """检查并安装所需的包"""
+    required_packages = [
+        'imbalanced-learn',  # 用于数据平衡
+        'scikit-learn'       # 确保scikit-learn是最新版本
+    ]
+    
+    print("=== 检查依赖包 ===")
+    for package in required_packages:
+        try:
+            if package == 'imbalanced-learn':
+                import imblearn
+                print(f"✓ {package} 已安装")
+            elif package == 'scikit-learn':
+                import sklearn
+                print(f"✓ {package} 已安装 (版本: {sklearn.__version__})")
+        except ImportError:
+            print(f"⚠ {package} 未安装，正在安装...")
+            if package == 'imbalanced-learn':
+                install_package('imbalanced-learn')
+            else:
+                install_package(package)
 warnings.filterwarnings('ignore')
 
 # 设置matplotlib支持中文字体（macOS系统）
@@ -125,6 +160,161 @@ def prepare_model_data(train_df: pd.DataFrame,
     print(f"{stage_prefix}最终特征数: {X_train.shape[1]}")
 
     return X_train, y_train, X_test
+
+
+def apply_data_balancing(X, y, method='smote', random_state=42):
+    """
+    应用数据平衡技术
+    
+    参数:
+    X: 特征矩阵
+    y: 目标变量
+    method: 平衡方法 ('smote', 'adasyn', 'random_oversample', 'random_undersample', 'balanced')
+    random_state: 随机种子
+    
+    返回:
+    X_resampled, y_resampled: 平衡后的数据
+    """
+    from collections import Counter
+    
+    print(f"原始数据分布: {Counter(y)}")
+    
+    if method == 'smote':
+        try:
+            from imblearn.over_sampling import SMOTE
+            sampler = SMOTE(random_state=random_state)
+            X_resampled, y_resampled = sampler.fit_resample(X, y)
+            print(f"SMOTE平衡后分布: {Counter(y_resampled)}")
+            return X_resampled, y_resampled
+        except ImportError:
+            print("SMOTE未安装，使用随机过采样替代")
+            method = 'random_oversample'
+    
+    if method == 'adasyn':
+        try:
+            from imblearn.over_sampling import ADASYN
+            sampler = ADASYN(random_state=random_state)
+            X_resampled, y_resampled = sampler.fit_resample(X, y)
+            print(f"ADASYN平衡后分布: {Counter(y_resampled)}")
+            return X_resampled, y_resampled
+        except ImportError:
+            print("ADASYN未安装，使用随机过采样替代")
+            method = 'random_oversample'
+    
+    if method == 'random_oversample':
+        try:
+            from imblearn.over_sampling import RandomOverSampler
+            sampler = RandomOverSampler(random_state=random_state)
+            X_resampled, y_resampled = sampler.fit_resample(X, y)
+            print(f"随机过采样后分布: {Counter(y_resampled)}")
+            return X_resampled, y_resampled
+        except ImportError:
+            print("imblearn未安装，返回原始数据")
+            return X, y
+    
+    if method == 'random_undersample':
+        try:
+            from imblearn.under_sampling import RandomUnderSampler
+            sampler = RandomUnderSampler(random_state=random_state)
+            X_resampled, y_resampled = sampler.fit_resample(X, y)
+            print(f"随机欠采样后分布: {Counter(y_resampled)}")
+            return X_resampled, y_resampled
+        except ImportError:
+            print("imblearn未安装，返回原始数据")
+            return X, y
+    
+    if method == 'balanced':
+        print("使用class_weight='balanced'，不进行数据重采样")
+        return X, y
+    
+    print("未指定有效方法，返回原始数据")
+    return X, y
+
+
+def evaluate_imbalanced_model(model, X_test, y_test, model_name="Model"):
+    """
+    专门针对不平衡数据集的模型评估函数
+    
+    参数:
+    model: 训练好的模型
+    X_test: 测试特征
+    y_test: 测试标签
+    model_name: 模型名称
+    
+    返回:
+    评估结果字典
+    """
+    from sklearn.metrics import classification_report, confusion_matrix, roc_auc_score, precision_recall_curve, auc
+    import seaborn as sns
+    
+    # 预测
+    y_pred = model.predict(X_test)
+    y_pred_proba = model.predict_proba(X_test)[:, 1]
+    
+    # 基础指标
+    print(f"\n=== {model_name} 模型评估 ===")
+    print(f"ROC-AUC: {roc_auc_score(y_test, y_pred_proba):.4f}")
+    
+    # 分类报告
+    print("\n分类报告:")
+    print(classification_report(y_test, y_pred, target_names=['正常', '违约']))
+    
+    # 混淆矩阵
+    cm = confusion_matrix(y_test, y_pred)
+    print(f"\n混淆矩阵:")
+    print(f"真负例 (TN): {cm[0,0]}, 假正例 (FP): {cm[0,1]}")
+    print(f"假负例 (FN): {cm[1,0]}, 真正例 (TP): {cm[1,1]}")
+    
+    # 计算不平衡数据集专用指标
+    precision = cm[1,1] / (cm[1,1] + cm[0,1]) if (cm[1,1] + cm[0,1]) > 0 else 0
+    recall = cm[1,1] / (cm[1,1] + cm[1,0]) if (cm[1,1] + cm[1,0]) > 0 else 0
+    f1 = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0
+    specificity = cm[0,0] / (cm[0,0] + cm[0,1]) if (cm[0,0] + cm[0,1]) > 0 else 0
+    
+    print(f"\n关键指标:")
+    print(f"精确率 (Precision): {precision:.4f}")
+    print(f"召回率 (Recall): {recall:.4f}")
+    print(f"F1分数: {f1:.4f}")
+    print(f"特异度 (Specificity): {specificity:.4f}")
+    
+    # PR-AUC (对不平衡数据更敏感)
+    precision_curve, recall_curve, _ = precision_recall_curve(y_test, y_pred_proba)
+    pr_auc = auc(recall_curve, precision_curve)
+    print(f"PR-AUC: {pr_auc:.4f}")
+    
+    # 可视化混淆矩阵
+    plt.figure(figsize=(8, 6))
+    sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', 
+                xticklabels=['预测正常', '预测违约'],
+                yticklabels=['实际正常', '实际违约'])
+    plt.title(f'{model_name} - 混淆矩阵')
+    plt.ylabel('实际标签')
+    plt.xlabel('预测标签')
+    plt.savefig(f'/Users/qingguo/Documents/project/carPricePredict/confusion_matrix_{model_name.replace(" ", "_")}.png', 
+                dpi=300, bbox_inches='tight')
+    plt.show()
+    
+    # 可视化PR曲线
+    plt.figure(figsize=(8, 6))
+    plt.plot(recall_curve, precision_curve, label=f'PR曲线 (AUC = {pr_auc:.3f})')
+    plt.xlabel('召回率')
+    plt.ylabel('精确率')
+    plt.title(f'{model_name} - PR曲线')
+    plt.legend()
+    plt.grid(True)
+    plt.savefig(f'/Users/qingguo/Documents/project/carPricePredict/pr_curve_{model_name.replace(" ", "_")}.png', 
+                dpi=300, bbox_inches='tight')
+    plt.show()
+    
+    return {
+        'roc_auc': roc_auc_score(y_test, y_pred_proba),
+        'pr_auc': pr_auc,
+        'precision': precision,
+        'recall': recall,
+        'f1': f1,
+        'specificity': specificity,
+        'confusion_matrix': cm
+    }
 
 
 def feature_engineering_stage():
@@ -239,24 +429,63 @@ def logistic_regression_stage():
         
         print(f"特征维度: {X.shape}, 标签维度: {y.shape}")
         
-        # Logistic Regression with GridSearchCV
-        print("Logistic Regression with Cross-Validation...")
-        lr_param_grid = {
-            'C': [0.1, 1, 10],
-            'penalty': ['l1', 'l2'],
-            'class_weight': [None, 'balanced'],
-            'solver': ['liblinear']  # 添加支持L1正则化的求解器
-        }
+        # 分析数据不平衡情况
+        from collections import Counter
+        original_dist = Counter(y)
+        imbalance_ratio = original_dist[0] / original_dist[1] if original_dist[1] > 0 else float('inf')
+        print(f"原始数据分布: {original_dist}, 不平衡比例: {imbalance_ratio:.1f}:1")
         
-        lr_grid = GridSearchCV(
-            LogisticRegression(max_iter=1000, random_state=42),
-            lr_param_grid,
-            cv=3,
-            scoring='roc_auc',
-            n_jobs=-1
-        )
+        # 尝试不同的数据平衡方法
+        balancing_methods = ['balanced', 'smote', 'random_oversample']
+        best_score = 0
+        best_model = None
+        best_method = None
         
-        lr_grid.fit(X, y)
+        for method in balancing_methods:
+            print(f"\n尝试数据平衡方法: {method}")
+            
+            if method == 'balanced':
+                # 使用class_weight，不进行数据重采样
+                X_balanced, y_balanced = X, y
+                # 修改参数网格以强制使用balanced
+                lr_param_grid = {
+                    'C': [0.1, 1, 10],
+                    'penalty': ['l1', 'l2'],
+                    'class_weight': ['balanced'],  # 强制使用balanced
+                    'solver': ['liblinear']
+                }
+            else:
+                # 应用数据重采样
+                X_balanced, y_balanced = apply_data_balancing(X, y, method=method)
+                # 使用原始参数网格
+                lr_param_grid = {
+                    'C': [0.1, 1, 10],
+                    'penalty': ['l1', 'l2'],
+                    'class_weight': [None],
+                    'solver': ['liblinear']
+                }
+            
+            # 训练模型
+            lr_grid = GridSearchCV(
+                LogisticRegression(max_iter=1000, random_state=42),
+                lr_param_grid,
+                cv=3,
+                scoring='roc_auc',
+                n_jobs=-1
+            )
+            
+            lr_grid.fit(X_balanced, y_balanced)
+            
+            print(f"{method} - Best AUC: {lr_grid.best_score_:.4f}")
+            print(f"Best params: {lr_grid.best_params_}")
+            
+            if lr_grid.best_score_ > best_score:
+                best_score = lr_grid.best_score_
+                best_model = lr_grid
+                best_method = method
+        
+        print(f"\n最佳数据平衡方法: {best_method}, 最佳AUC: {best_score:.4f}")
+        lr_grid = best_model
         
         print(f"Logistic Regression - Best AUC: {lr_grid.best_score_:.4f}")
         print(f"Best params: {lr_grid.best_params_}")
@@ -327,23 +556,61 @@ def random_forest_stage():
         
         print(f"特征维度: {X.shape}, 标签维度: {y.shape}")
         
-        # Random Forest with GridSearchCV
-        print("Random Forest with Cross-Validation...")
-        rf_param_grid = {
-            'n_estimators': [50, 100, 200],
-            'max_depth': [5, 10, 15, None],
-            'class_weight': [None, 'balanced']
-        }
+        # 分析数据不平衡情况
+        from collections import Counter
+        original_dist = Counter(y)
+        imbalance_ratio = original_dist[0] / original_dist[1] if original_dist[1] > 0 else float('inf')
+        print(f"原始数据分布: {original_dist}, 不平衡比例: {imbalance_ratio:.1f}:1")
         
-        rf_grid = GridSearchCV(
-            RandomForestClassifier(random_state=42),
-            rf_param_grid,
-            cv=3,
-            scoring='roc_auc',
-            n_jobs=-1
-        )
+        # 尝试不同的数据平衡方法
+        balancing_methods = ['balanced', 'smote', 'random_undersample']
+        best_score = 0
+        best_model = None
+        best_method = None
         
-        rf_grid.fit(X, y)
+        for method in balancing_methods:
+            print(f"\n尝试数据平衡方法: {method}")
+            
+            if method == 'balanced':
+                # 使用class_weight，不进行数据重采样
+                X_balanced, y_balanced = X, y
+                # 修改参数网格以包含balanced选项
+                rf_param_grid = {
+                    'n_estimators': [100, 200],
+                    'max_depth': [10, 15, None],
+                    'class_weight': ['balanced', 'balanced_subsample']
+                }
+            else:
+                # 应用数据重采样
+                X_balanced, y_balanced = apply_data_balancing(X, y, method=method)
+                # 使用原始参数网格
+                rf_param_grid = {
+                    'n_estimators': [100, 200],
+                    'max_depth': [10, 15, None],
+                    'class_weight': [None]
+                }
+            
+            # 训练模型
+            rf_grid = GridSearchCV(
+                RandomForestClassifier(random_state=42, n_jobs=-1),
+                rf_param_grid,
+                cv=3,
+                scoring='roc_auc',
+                n_jobs=-1
+            )
+            
+            rf_grid.fit(X_balanced, y_balanced)
+            
+            print(f"{method} - Best AUC: {rf_grid.best_score_:.4f}")
+            print(f"Best params: {rf_grid.best_params_}")
+            
+            if rf_grid.best_score_ > best_score:
+                best_score = rf_grid.best_score_
+                best_model = rf_grid
+                best_method = method
+        
+        print(f"\n最佳数据平衡方法: {best_method}, 最佳AUC: {best_score:.4f}")
+        rf_grid = best_model
         
         print(f"Random Forest - Best AUC: {rf_grid.best_score_:.4f}")
         print(f"Best params: {rf_grid.best_params_}")
@@ -784,6 +1051,9 @@ def main():
     print("=== 贷款违约预测项目 ===")
     print(f"开始时间: {start_time.strftime('%Y-%m-%d %H:%M:%S')}")
     
+    # 检查并安装依赖包
+    check_and_install_requirements()
+    
     try:
         # 1. 数据加载阶段
         train = pd.read_csv('/Users/qingguo/Documents/project/carPricePredict/data/train.csv')
@@ -795,6 +1065,37 @@ def main():
         print(f"数据加载成功 - 训练集: {train.shape}, 测试集: {test.shape}")
         print(f"训练集列名: {list(train.columns)}")
         print(f"测试集列名: {list(test.columns)}")
+        
+        # 分析目标变量分布（数据不平衡分析）
+        print("\n=== 数据不平衡分析 ===")
+        if '是否违约' in train.columns:
+            target_dist = train['是否违约'].value_counts()
+            target_ratio = train['是否违约'].value_counts(normalize=True)
+            print(f"目标变量分布:")
+            print(f"正常贷款: {target_dist[0]} ({target_ratio[0]:.1%})")
+            print(f"违约贷款: {target_dist[1]} ({target_ratio[1]:.1%})")
+            print(f"不平衡比例: {target_dist[0]/target_dist[1]:.1f}:1")
+            
+            # 可视化目标分布
+            plt.figure(figsize=(10, 5))
+            
+            plt.subplot(1, 2, 1)
+            target_dist.plot(kind='bar', color=['green', 'red'])
+            plt.title('目标变量分布（数量）')
+            plt.xlabel('类别')
+            plt.ylabel('数量')
+            plt.xticks([0, 1], ['正常', '违约'], rotation=0)
+            
+            plt.subplot(1, 2, 2)
+            target_ratio.plot(kind='bar', color=['green', 'red'])
+            plt.title('目标变量分布（比例）')
+            plt.xlabel('类别')
+            plt.ylabel('比例')
+            plt.xticks([0, 1], ['正常', '违约'], rotation=0)
+            
+            plt.tight_layout()
+            plt.savefig('/Users/qingguo/Documents/project/carPricePredict/target_distribution.png', dpi=300, bbox_inches='tight')
+            plt.show()
         
         # 4. 特征工程阶段
         print("\n" + "="*50)
